@@ -11076,6 +11076,7 @@ bool Expr::EvaluateAsConstantExpr(EvalResult &Result, ConstExprUsage Usage,
                                   const ASTContext &Ctx) const {
   EvalInfo::EvaluationMode EM = EvalInfo::EM_ConstantExpression;
   EvalInfo Info(Ctx, Result, EM);
+  Info.InConstantContext = true;
   if (!::Evaluate(Result.Val, Info, this))
     return false;
 
@@ -11716,6 +11717,7 @@ bool Expr::EvaluateWithSubstitution(APValue &Value, ASTContext &Ctx,
                                     const Expr *This) const {
   Expr::EvalStatus Status;
   EvalInfo Info(Ctx, Status, EvalInfo::EM_ConstantExpressionUnevaluated);
+  Info.InConstantContext = true;
 
   LValue ThisVal;
   const LValue *ThisPtr = nullptr;
@@ -11799,6 +11801,7 @@ bool Expr::isPotentialConstantExprUnevaluated(Expr *E,
 
   EvalInfo Info(FD->getASTContext(), Status,
                 EvalInfo::EM_PotentialConstantExpressionUnevaluated);
+  Info.InConstantContext = true;
 
   // Fabricate a call stack frame to give the arguments a plausible cover story.
   ArrayRef<const Expr*> Args;
