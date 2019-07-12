@@ -599,24 +599,6 @@ template <class ELFT> void SymbolTable::fetchLazy(Symbol *Sym) {
     addFile<ELFT>(File);
 }
 
-// This function takes care of the case in which shared libraries depend on
-// the user program (not the other way, which is usual). Shared libraries
-// may have undefined symbols, expecting that the user program provides
-// the definitions for them. An example is BSD's __progname symbol.
-// We need to put such symbols to the main program's .dynsym so that
-// shared libraries can find them.
-// Except this, we ignore undefined symbols in DSOs.
-template <class ELFT> void SymbolTable::scanShlibUndefined() {
-  for (InputFile *F : SharedFiles) {
-    for (StringRef U : F->getUndefinedSymbols()) {
-      Symbol *Sym = find(U);
-      if (!Sym || !Sym->isDefined())
-        continue;
-      Sym->ExportDynamic = true;
-    }
-  }
-}
-
 // Initialize DemangledSyms with a map from demangled symbols to symbol
 // objects. Used to handle "extern C++" directive in version scripts.
 //
@@ -832,9 +814,3 @@ template void SymbolTable::addShared<ELF64LE>(StringRef, SharedFile<ELF64LE> &,
 template void SymbolTable::addShared<ELF64BE>(StringRef, SharedFile<ELF64BE> &,
                                               const typename ELF64BE::Sym &,
                                               uint32_t Alignment, uint32_t);
-
-template void SymbolTable::scanShlibUndefined<ELF32LE>();
-template void SymbolTable::scanShlibUndefined<ELF32BE>();
-template void SymbolTable::scanShlibUndefined<ELF64LE>();
-template void SymbolTable::scanShlibUndefined<ELF64BE>();
-

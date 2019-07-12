@@ -335,6 +335,9 @@ ASM_SYMBOL_INTERCEPTOR(__sigsetjmp):
 ASM_SIZE(ASM_SYMBOL_INTERCEPTOR(__sigsetjmp))
 #endif
 
-NO_EXEC_STACK_DIRECTIVE
+#if defined(__linux__)
+/* We do not need executable stack.  */
+.section        .note.GNU-stack,"",@progbits
+#endif
 
 #endif

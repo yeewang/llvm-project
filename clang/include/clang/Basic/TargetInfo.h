@@ -816,7 +816,6 @@ public:
     struct {
       int Min;
       int Max;
-      bool isConstrained;
     } ImmRange;
     llvm::SmallSet<int, 4> ImmSet;
 
@@ -827,7 +826,6 @@ public:
         : Flags(0), TiedOperand(-1), ConstraintStr(ConstraintStr.str()),
           Name(Name.str()) {
       ImmRange.Min = ImmRange.Max = 0;
-      ImmRange.isConstrained = false;
     }
 
     const std::string &getConstraintStr() const { return ConstraintStr; }
@@ -856,9 +854,8 @@ public:
       return (Flags & CI_ImmediateConstant) != 0;
     }
     bool isValidAsmImmediate(const llvm::APInt &Value) const {
-      if (!ImmSet.empty())
-        return ImmSet.count(Value.getZExtValue()) != 0;
-      return !ImmRange.isConstrained || (Value.sge(ImmRange.Min) && Value.sle(ImmRange.Max));
+      return (Value.sge(ImmRange.Min) && Value.sle(ImmRange.Max)) ||
+             ImmSet.count(Value.getZExtValue()) != 0;
     }
 
     void setIsReadWrite() { Flags |= CI_ReadWrite; }
@@ -870,7 +867,6 @@ public:
       Flags |= CI_ImmediateConstant;
       ImmRange.Min = Min;
       ImmRange.Max = Max;
-      ImmRange.isConstrained = true;
     }
     void setRequiresImmediate(llvm::ArrayRef<int> Exacts) {
       Flags |= CI_ImmediateConstant;
@@ -883,6 +879,8 @@ public:
     }
     void setRequiresImmediate() {
       Flags |= CI_ImmediateConstant;
+      ImmRange.Min = INT_MIN;
+      ImmRange.Max = INT_MAX;
     }
 
     /// Indicate that this is an input operand that is tied to

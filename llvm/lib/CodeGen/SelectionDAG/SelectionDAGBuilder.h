@@ -17,7 +17,6 @@
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
@@ -122,7 +121,7 @@ class SelectionDAGBuilder {
 
   /// Keeps track of dbg_values for which we have not yet seen the referent.
   /// We defer handling these until we do see it.
-  MapVector<const Value*, DanglingDebugInfoVector> DanglingDebugInfoMap;
+  DenseMap<const Value*, DanglingDebugInfoVector> DanglingDebugInfoMap;
 
 public:
   /// Loads are not emitted to the program immediately.  We bunch them up and

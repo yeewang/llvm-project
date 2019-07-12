@@ -1018,7 +1018,10 @@ template <class ELFT> void SharedFile<ELFT>::parseRest() {
     }
 
     if (Sym.isUndefined()) {
-      this->Undefs.insert(Name);
+      Symbol *S = Symtab->addUndefined<ELFT>(Name, Sym.getBinding(),
+                                             Sym.st_other, Sym.getType(),
+                                             /*CanOmitFromDynSym=*/false, this);
+      S->ExportDynamic = true;
       continue;
     }
 

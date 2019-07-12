@@ -608,7 +608,7 @@ void CGDebugInfo::CreateCompileUnit() {
   // Create new compile unit.
   TheCU = DBuilder.createCompileUnit(
       LangTag, CUFile, CGOpts.EmitVersionIdentMetadata ? Producer : "",
-      LO.Optimize || CGOpts.PrepareForLTO || CGOpts.EmitSummaryIndex,
+      LO.Optimize || CGOpts.PrepareForLTO || CGOpts.PrepareForThinLTO,
       CGOpts.DwarfDebugFlags, RuntimeVers,
       (CGOpts.getSplitDwarfMode() != CodeGenOptions::NoFission)
           ? ""

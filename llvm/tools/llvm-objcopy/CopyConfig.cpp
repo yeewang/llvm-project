@@ -475,9 +475,6 @@ DriverConfig parseObjcopyOptions(ArrayRef<const char *> ArgsArr) {
                        Arg->getValue(), UseRegex);
   for (auto Arg : InputArgs.filtered(OBJCOPY_keep_symbol))
     Config.SymbolsToKeep.emplace_back(Arg->getValue(), UseRegex);
-  for (auto Arg : InputArgs.filtered(OBJCOPY_keep_symbols))
-    addSymbolsFromFile(Config.SymbolsToKeep, DC.Alloc, Arg->getValue(),
-                       UseRegex);
 
   Config.DeterministicArchives = InputArgs.hasFlag(
       OBJCOPY_enable_deterministic_archives,

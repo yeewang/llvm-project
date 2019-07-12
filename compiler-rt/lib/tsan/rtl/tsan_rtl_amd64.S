@@ -389,6 +389,10 @@ ASM_SYMBOL_INTERCEPTOR(__sigsetjmp):
 ASM_SIZE(ASM_SYMBOL_INTERCEPTOR(__sigsetjmp))
 #endif  // !defined(__APPLE__) && !defined(__NetBSD__)
 
-NO_EXEC_STACK_DIRECTIVE
+#if defined(__FreeBSD__) || defined(__linux__)
+/* We do not need executable stack.  */
+/* This note is not needed on NetBSD. */
+.section        .note.GNU-stack,"",@progbits
+#endif
 
 #endif

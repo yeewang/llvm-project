@@ -398,8 +398,6 @@ private:
   Error runRegularLTO(AddStreamFn AddStream);
   Error runThinLTO(AddStreamFn AddStream, NativeObjectCache Cache);
 
-  Error checkPartiallySplit();
-
   mutable bool CalledGetMaxTasks = false;
 
   // Use Optional to distinguish false from not yet initialized.

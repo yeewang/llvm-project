@@ -55,7 +55,6 @@
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Instrumentation/BoundsChecking.h"
 #include "llvm/Transforms/Instrumentation/GCOVProfiler.h"
-#include "llvm/Transforms/Instrumentation/InstrProfiling.h"
 #include "llvm/Transforms/Instrumentation/MemorySanitizer.h"
 #include "llvm/Transforms/Instrumentation/ThreadSanitizer.h"
 #include "llvm/Transforms/ObjCARC.h"
@@ -517,21 +516,6 @@ static Optional<GCOVOptions> getGCOVOptions(const CodeGenOptions &CodeGenOpts) {
   return Options;
 }
 
-static Optional<InstrProfOptions>
-getInstrProfOptions(const CodeGenOptions &CodeGenOpts,
-                    const LangOptions &LangOpts) {
-  if (!CodeGenOpts.hasProfileClangInstr())
-    return None;
-  InstrProfOptions Options;
-  Options.NoRedZone = CodeGenOpts.DisableRedZone;
-  Options.InstrProfileOutput = CodeGenOpts.InstrProfileOutput;
-
-  // TODO: Surface the option to emit atomic profile counter increments at
-  // the driver level.
-  Options.Atomic = LangOpts.Sanitize.has(SanitizerKind::Thread);
-  return Options;
-}
-
 void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
                                       legacy::FunctionPassManager &FPM) {
   // Handle disabling of all LLVM passes, where we want to preserve the
@@ -562,7 +546,7 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
     PMBuilder.Inliner = createFunctionInliningPass(
         CodeGenOpts.OptimizationLevel, CodeGenOpts.OptimizeSize,
         (!CodeGenOpts.SampleProfileFile.empty() &&
-         CodeGenOpts.EmitSummaryIndex));
+         CodeGenOpts.PrepareForThinLTO));
   }
 
   PMBuilder.OptLevel = CodeGenOpts.OptimizationLevel;
@@ -572,7 +556,7 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
 
   PMBuilder.DisableUnrollLoops = !CodeGenOpts.UnrollLoops;
   PMBuilder.MergeFunctions = CodeGenOpts.MergeFunctions;
-  PMBuilder.PrepareForThinLTO = CodeGenOpts.EmitSummaryIndex;
+  PMBuilder.PrepareForThinLTO = CodeGenOpts.PrepareForThinLTO;
   PMBuilder.PrepareForLTO = CodeGenOpts.PrepareForLTO;
   PMBuilder.RerollLoops = CodeGenOpts.RerollLoops;
 
@@ -693,10 +677,17 @@ void EmitAssemblyHelper::CreatePasses(legacy::PassManager &MPM,
       MPM.add(createStripSymbolsPass(true));
   }
 
-  if (Optional<InstrProfOptions> Options =
-          getInstrProfOptions(CodeGenOpts, LangOpts))
-    MPM.add(createInstrProfilingLegacyPass(*Options));
+  if (CodeGenOpts.hasProfileClangInstr()) {
+    InstrProfOptions Options;
+    Options.NoRedZone = CodeGenOpts.DisableRedZone;
+    Options.InstrProfileOutput = CodeGenOpts.InstrProfileOutput;
 
+    // TODO: Surface the option to emit atomic profile counter increments at
+    // the driver level.
+    Options.Atomic = LangOpts.Sanitize.has(SanitizerKind::Thread);
+
+    MPM.add(createInstrProfilingLegacyPass(Options));
+  }
   if (CodeGenOpts.hasProfileIRInstr()) {
     PMBuilder.EnablePGOInstrGen = true;
     if (!CodeGenOpts.InstrProfileOutput.empty())
@@ -819,7 +810,7 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
     break;
 
   case Backend_EmitBC:
-    if (CodeGenOpts.EmitSummaryIndex && !CodeGenOpts.DisableLLVMPasses) {
+    if (CodeGenOpts.PrepareForThinLTO && !CodeGenOpts.DisableLLVMPasses) {
       if (!CodeGenOpts.ThinLinkBitcodeFile.empty()) {
         ThinLinkOS = openOutputFile(CodeGenOpts.ThinLinkBitcodeFile);
         if (!ThinLinkOS)
@@ -829,10 +820,24 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
                                CodeGenOpts.EnableSplitLTOUnit);
       PerModulePasses.add(createWriteThinLTOBitcodePass(
           *OS, ThinLinkOS ? &ThinLinkOS->os() : nullptr));
+    } else {
+      // Emit a module summary by default for Regular LTO except for ld64
+      // targets
+      bool EmitLTOSummary =
+          (CodeGenOpts.PrepareForLTO &&
+           !CodeGenOpts.DisableLLVMPasses &&
+           llvm::Triple(TheModule->getTargetTriple()).getVendor() !=
+               llvm::Triple::Apple);
+      if (EmitLTOSummary) {
+        if (!TheModule->getModuleFlag("ThinLTO"))
+          TheModule->addModuleFlag(Module::Error, "ThinLTO", uint32_t(0));
+        TheModule->addModuleFlag(Module::Error, "EnableSplitLTOUnit",
+                                 CodeGenOpts.EnableSplitLTOUnit);
+      }
+
+      PerModulePasses.add(createBitcodeWriterPass(
+          *OS, CodeGenOpts.EmitLLVMUseLists, EmitLTOSummary));
     }
-    else
-      PerModulePasses.add(
-          createBitcodeWriterPass(*OS, CodeGenOpts.EmitLLVMUseLists));
     break;
 
   case Backend_EmitLL:
@@ -995,15 +1000,12 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
   ModulePassManager MPM(CodeGenOpts.DebugPassManager);
 
   if (!CodeGenOpts.DisableLLVMPasses) {
-    bool IsThinLTO = CodeGenOpts.EmitSummaryIndex;
+    bool IsThinLTO = CodeGenOpts.PrepareForThinLTO;
     bool IsLTO = CodeGenOpts.PrepareForLTO;
 
     if (CodeGenOpts.OptimizationLevel == 0) {
       if (Optional<GCOVOptions> Options = getGCOVOptions(CodeGenOpts))
         MPM.addPass(GCOVProfilerPass(*Options));
-      if (Optional<InstrProfOptions> Options =
-              getInstrProfOptions(CodeGenOpts, LangOpts))
-        MPM.addPass(InstrProfiling(*Options));
 
       // Build a minimal pipeline based on the semantics required by Clang,
       // which is just that always inlining occurs.
@@ -1013,9 +1015,11 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
       if (LangOpts.Sanitize.has(SanitizerKind::LocalBounds))
         MPM.addPass(createModuleToFunctionPassAdaptor(BoundsCheckingPass()));
 
-      // Lastly, add a semantically necessary pass for ThinLTO.
-      if (IsThinLTO)
+      // Lastly, add semantically necessary passes for LTO.
+      if (IsLTO || IsThinLTO) {
+        MPM.addPass(CanonicalizeAliasesPass());
         MPM.addPass(NameAnonGlobalPass());
+      }
     } else {
       // Map our optimization levels into one of the distinct levels used to
       // configure the pipeline.
@@ -1043,11 +1047,6 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
         PB.registerPipelineStartEPCallback([Options](ModulePassManager &MPM) {
           MPM.addPass(GCOVProfilerPass(*Options));
         });
-      if (Optional<InstrProfOptions> Options =
-              getInstrProfOptions(CodeGenOpts, LangOpts))
-        PB.registerPipelineStartEPCallback([Options](ModulePassManager &MPM) {
-          MPM.addPass(InstrProfiling(*Options));
-        });
 
       if (IsThinLTO) {
         MPM = PB.buildThinLTOPreLinkDefaultPipeline(
@@ -1058,6 +1057,7 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
         MPM = PB.buildLTOPreLinkDefaultPipeline(Level,
                                                 CodeGenOpts.DebugPassManager);
         MPM.addPass(CanonicalizeAliasesPass());
+        MPM.addPass(NameAnonGlobalPass());
       } else {
         MPM = PB.buildPerModuleDefaultPipeline(Level,
                                                CodeGenOpts.DebugPassManager);
@@ -1077,7 +1077,7 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
     break;
 
   case Backend_EmitBC:
-    if (CodeGenOpts.EmitSummaryIndex && !CodeGenOpts.DisableLLVMPasses) {
+    if (CodeGenOpts.PrepareForThinLTO && !CodeGenOpts.DisableLLVMPasses) {
       if (!CodeGenOpts.ThinLinkBitcodeFile.empty()) {
         ThinLinkOS = openOutputFile(CodeGenOpts.ThinLinkBitcodeFile);
         if (!ThinLinkOS)
@@ -1088,9 +1088,21 @@ void EmitAssemblyHelper::EmitAssemblyWithNewPassManager(
       MPM.addPass(ThinLTOBitcodeWriterPass(*OS, ThinLinkOS ? &ThinLinkOS->os()
                                                            : nullptr));
     } else {
-      MPM.addPass(BitcodeWriterPass(*OS, CodeGenOpts.EmitLLVMUseLists,
-                                    CodeGenOpts.EmitSummaryIndex,
-                                    CodeGenOpts.EmitSummaryIndex));
+      // Emit a module summary by default for Regular LTO except for ld64
+      // targets
+      bool EmitLTOSummary =
+          (CodeGenOpts.PrepareForLTO &&
+           !CodeGenOpts.DisableLLVMPasses &&
+           llvm::Triple(TheModule->getTargetTriple()).getVendor() !=
+               llvm::Triple::Apple);
+      if (EmitLTOSummary) {
+        if (!TheModule->getModuleFlag("ThinLTO"))
+          TheModule->addModuleFlag(Module::Error, "ThinLTO", uint32_t(0));
+        TheModule->addModuleFlag(Module::Error, "EnableSplitLTOUnit",
+                                 CodeGenOpts.EnableSplitLTOUnit);
+      }
+      MPM.addPass(
+          BitcodeWriterPass(*OS, CodeGenOpts.EmitLLVMUseLists, EmitLTOSummary));
     }
     break;
 
