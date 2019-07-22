@@ -35,6 +35,7 @@ class LoopInfo;
 class MDNode;
 class MemoryDependenceResults;
 class MemorySSAUpdater;
+class PostDominatorTree;
 class ReturnInst;
 class TargetLibraryInfo;
 class Value;
@@ -60,6 +61,12 @@ void DeleteDeadBlock(BasicBlock *BB, DomTreeUpdater *DTU = nullptr,
 void DeleteDeadBlocks(ArrayRef <BasicBlock *> BBs,
                       DomTreeUpdater *DTU = nullptr,
                       bool KeepOneInputPHIs = false);
+
+/// Delete all basic blocks from \p F that are not reachable from its entry
+/// node. If \p KeepOneInputPHIs is true, one-input Phis in successors of
+/// blocks being deleted will be preserved.
+bool EliminateUnreachableBlocks(Function &F, DomTreeUpdater *DTU = nullptr,
+                                bool KeepOneInputPHIs = false);
 
 /// We know that BB has one predecessor. If there are any single-entry PHI nodes
 /// in it, fold them away. This handles the case when all entries to the PHI
@@ -103,16 +110,19 @@ void ReplaceInstWithInst(Instruction *From, Instruction *To);
 /// during critical edge splitting.
 struct CriticalEdgeSplittingOptions {
   DominatorTree *DT;
+  PostDominatorTree *PDT;
   LoopInfo *LI;
   MemorySSAUpdater *MSSAU;
   bool MergeIdenticalEdges = false;
   bool KeepOneInputPHIs = false;
   bool PreserveLCSSA = false;
+  bool IgnoreUnreachableDests = false;
 
   CriticalEdgeSplittingOptions(DominatorTree *DT = nullptr,
                                LoopInfo *LI = nullptr,
-                               MemorySSAUpdater *MSSAU = nullptr)
-      : DT(DT), LI(LI), MSSAU(MSSAU) {}
+                               MemorySSAUpdater *MSSAU = nullptr,
+                               PostDominatorTree *PDT = nullptr)
+      : DT(DT), PDT(PDT), LI(LI), MSSAU(MSSAU) {}
 
   CriticalEdgeSplittingOptions &setMergeIdenticalEdges() {
     MergeIdenticalEdges = true;
@@ -126,6 +136,11 @@ struct CriticalEdgeSplittingOptions {
 
   CriticalEdgeSplittingOptions &setPreserveLCSSA() {
     PreserveLCSSA = true;
+    return *this;
+  }
+
+  CriticalEdgeSplittingOptions &setIgnoreUnreachableDests() {
+    IgnoreUnreachableDests = true;
     return *this;
   }
 };
@@ -270,7 +285,8 @@ ReturnInst *FoldReturnIntoUncondBranch(ReturnInst *RI, BasicBlock *BB,
 ///   SplitBefore
 ///   Tail
 ///
-/// If Unreachable is true, then ThenBlock ends with
+/// If \p ThenBlock is not specified, a new block will be created for it.
+/// If \p Unreachable is true, the newly created block will end with
 /// UnreachableInst, otherwise it branches to Tail.
 /// Returns the NewBasicBlock's terminator.
 ///
@@ -279,7 +295,8 @@ Instruction *SplitBlockAndInsertIfThen(Value *Cond, Instruction *SplitBefore,
                                        bool Unreachable,
                                        MDNode *BranchWeights = nullptr,
                                        DominatorTree *DT = nullptr,
-                                       LoopInfo *LI = nullptr);
+                                       LoopInfo *LI = nullptr,
+                                       BasicBlock *ThenBlock = nullptr);
 
 /// SplitBlockAndInsertIfThenElse is similar to SplitBlockAndInsertIfThen,
 /// but also creates the ElseBlock.

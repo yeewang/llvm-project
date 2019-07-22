@@ -23,8 +23,9 @@ struct FuzzingOptions {
   int OOMExitCode = 71;
   int InterruptExitCode = 72;
   int ErrorExitCode = 77;
-  bool IgnoreTimeouts = 1;
-  bool IgnoreOOMs = 1;
+  bool IgnoreTimeouts = true;
+  bool IgnoreOOMs = true;
+  bool IgnoreCrashes = false;
   int MaxTotalTimeSec = 0;
   int RssLimitMb = 0;
   int MallocLimitMb = 0;
@@ -50,6 +51,9 @@ struct FuzzingOptions {
   std::string ExitOnItem;
   std::string FocusFunction;
   std::string DataFlowTrace;
+  std::string CollectDataFlow;
+  std::string FeaturesDir;
+  std::string StopFile;
   bool SaveArtifacts = true;
   bool PrintNEW = true; // Print a status line when new units are found;
   bool PrintNewCovPcs = false;

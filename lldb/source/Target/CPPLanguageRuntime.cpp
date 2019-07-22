@@ -1,5 +1,4 @@
 //===-- CPPLanguageRuntime.cpp
-//-------------------------------------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -8,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Target/CPPLanguageRuntime.h"
+#include "lldb/Target/ObjCLanguageRuntime.h"
 
 #include <string.h>
 
@@ -16,6 +16,7 @@
 #include "llvm/ADT/StringRef.h"
 
 #include "lldb/Symbol/Block.h"
+#include "lldb/Symbol/Variable.h"
 #include "lldb/Symbol/VariableList.h"
 
 #include "lldb/Core/PluginManager.h"
@@ -32,13 +33,19 @@
 using namespace lldb;
 using namespace lldb_private;
 
-//----------------------------------------------------------------------
+static ConstString g_this = ConstString("this");
+
+char CPPLanguageRuntime::ID = 0;
+
 // Destructor
-//----------------------------------------------------------------------
 CPPLanguageRuntime::~CPPLanguageRuntime() {}
 
 CPPLanguageRuntime::CPPLanguageRuntime(Process *process)
     : LanguageRuntime(process) {}
+
+bool CPPLanguageRuntime::IsWhitelistedRuntimeValue(ConstString name) {
+  return name == g_this;
+}
 
 bool CPPLanguageRuntime::GetObjectDescription(Stream &str,
                                               ValueObject &object) {
@@ -170,7 +177,7 @@ CPPLanguageRuntime::FindLibCppStdFunctionCallableInfo(
   //
   // This covers the case of the lambda known at compile time.
   size_t first_open_angle_bracket = vtable_name.find('<') + 1;
-  size_t first_comma = vtable_name.find_first_of(',');
+  size_t first_comma = vtable_name.find(',');
 
   llvm::StringRef first_template_parameter =
       vtable_name.slice(first_open_angle_bracket, first_comma);
@@ -197,7 +204,7 @@ CPPLanguageRuntime::FindLibCppStdFunctionCallableInfo(
       return llvm::Regex::escape(first_template_parameter.str()) +
              R"(::operator\(\)\(.*\))";
 
-    if (symbol != NULL &&
+    if (symbol != nullptr &&
         symbol->GetName().GetStringRef().contains("__invoke")) {
 
       llvm::StringRef symbol_name = symbol->GetName().GetStringRef();
@@ -224,8 +231,8 @@ CPPLanguageRuntime::FindLibCppStdFunctionCallableInfo(
 
   SymbolContextList scl;
 
-  target.GetImages().FindFunctions(RegularExpression{func_to_match}, true, true,
-                                   true, scl);
+  target.GetImages().FindSymbolsMatchingRegExAndType(
+      RegularExpression{R"(^)" + func_to_match}, eSymbolTypeAny, scl, true);
 
   // Case 1,2 or 3
   if (scl.GetSize() >= 1) {
@@ -261,7 +268,7 @@ CPPLanguageRuntime::FindLibCppStdFunctionCallableInfo(
   }
 
   // Case 4 or 5
-  if (!symbol->GetName().GetStringRef().startswith("vtable for")) {
+  if (symbol && !symbol->GetName().GetStringRef().startswith("vtable for")) {
     optional_info.callable_case =
         LibCppStdFunctionCallableCase::FreeOrMemberFunction;
     optional_info.callable_address = function_address_resolved;
@@ -320,7 +327,7 @@ CPPLanguageRuntime::GetStepThroughTrampolinePlan(Thread &thread,
   StackFrameSP frame = thread.GetStackFrameAtIndex(0);
 
   if (frame) {
-    ValueObjectSP value_sp = frame->FindVariable(ConstString("this"));
+    ValueObjectSP value_sp = frame->FindVariable(g_this);
 
     CPPLanguageRuntime::LibCppStdFunctionCallableInfo callable_info =
         FindLibCppStdFunctionCallableInfo(value_sp);

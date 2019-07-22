@@ -70,9 +70,7 @@
 #define FTN_GET_ANCESTOR_THREAD_NUM omp_get_ancestor_thread_num
 #define FTN_GET_TEAM_SIZE omp_get_team_size
 #define FTN_IN_FINAL omp_in_final
-//  #define FTN_SET_PROC_BIND                    omp_set_proc_bind
 #define FTN_GET_PROC_BIND omp_get_proc_bind
-//  #define FTN_CURR_PROC_BIND                   omp_curr_proc_bind
 #if OMP_40_ENABLED
 #define FTN_GET_NUM_TEAMS omp_get_num_teams
 #define FTN_GET_TEAM_NUM omp_get_team_num
@@ -132,10 +130,10 @@
 
 #if OMP_50_ENABLED
 #define FTN_CONTROL_TOOL omp_control_tool
+#define FTN_INIT_ALLOCATOR omp_init_allocator
+#define FTN_DESTROY_ALLOCATOR omp_destroy_allocator
 #define FTN_SET_DEFAULT_ALLOCATOR omp_set_default_allocator
 #define FTN_GET_DEFAULT_ALLOCATOR omp_get_default_allocator
-#define FTN_ALLOC omp_alloc
-#define FTN_FREE omp_free
 #define FTN_GET_DEVICE_NUM omp_get_device_num
 #define FTN_SET_AFFINITY_FORMAT omp_set_affinity_format
 #define FTN_GET_AFFINITY_FORMAT omp_get_affinity_format
@@ -143,6 +141,8 @@
 #define FTN_CAPTURE_AFFINITY omp_capture_affinity
 #define FTN_PAUSE_RESOURCE omp_pause_resource
 #define FTN_PAUSE_RESOURCE_ALL omp_pause_resource_all
+#define FTN_GET_SUPPORTED_ACTIVE_LEVELS omp_get_supported_active_levels
+#define FTN_FULFILL_EVENT omp_fulfill_event
 #endif
 
 #endif /* KMP_FTN_PLAIN */
@@ -201,9 +201,7 @@
 #define FTN_GET_ANCESTOR_THREAD_NUM omp_get_ancestor_thread_num_
 #define FTN_GET_TEAM_SIZE omp_get_team_size_
 #define FTN_IN_FINAL omp_in_final_
-//  #define FTN_SET_PROC_BIND                    omp_set_proc_bind_
 #define FTN_GET_PROC_BIND omp_get_proc_bind_
-//  #define FTN_CURR_PROC_BIND                   omp_curr_proc_bind_
 #if OMP_40_ENABLED
 #define FTN_GET_NUM_TEAMS omp_get_num_teams_
 #define FTN_GET_TEAM_NUM omp_get_team_num_
@@ -263,6 +261,8 @@
 
 #if OMP_50_ENABLED
 #define FTN_CONTROL_TOOL omp_control_tool_
+#define FTN_INIT_ALLOCATOR omp_init_allocator_
+#define FTN_DESTROY_ALLOCATOR omp_destroy_allocator_
 #define FTN_SET_DEFAULT_ALLOCATOR omp_set_default_allocator_
 #define FTN_GET_DEFAULT_ALLOCATOR omp_get_default_allocator_
 #define FTN_ALLOC omp_alloc_
@@ -274,6 +274,8 @@
 #define FTN_CAPTURE_AFFINITY omp_capture_affinity_
 #define FTN_PAUSE_RESOURCE omp_pause_resource_
 #define FTN_PAUSE_RESOURCE_ALL omp_pause_resource_all_
+#define FTN_GET_SUPPORTED_ACTIVE_LEVELS omp_get_supported_active_levels_
+#define FTN_FULFILL_EVENT omp_fulfill_event_
 #endif
 
 #endif /* KMP_FTN_APPEND */
@@ -332,9 +334,7 @@
 #define FTN_GET_ANCESTOR_THREAD_NUM OMP_GET_ANCESTOR_THREAD_NUM
 #define FTN_GET_TEAM_SIZE OMP_GET_TEAM_SIZE
 #define FTN_IN_FINAL OMP_IN_FINAL
-//  #define FTN_SET_PROC_BIND                    OMP_SET_PROC_BIND
 #define FTN_GET_PROC_BIND OMP_GET_PROC_BIND
-//  #define FTN_CURR_PROC_BIND                   OMP_CURR_PROC_BIND
 #if OMP_40_ENABLED
 #define FTN_GET_NUM_TEAMS OMP_GET_NUM_TEAMS
 #define FTN_GET_TEAM_NUM OMP_GET_TEAM_NUM
@@ -394,10 +394,10 @@
 
 #if OMP_50_ENABLED
 #define FTN_CONTROL_TOOL OMP_CONTROL_TOOL
+#define FTN_INIT_ALLOCATOR OMP_INIT_ALLOCATOR
+#define FTN_DESTROY_ALLOCATOR OMP_DESTROY_ALLOCATOR
 #define FTN_SET_DEFAULT_ALLOCATOR OMP_SET_DEFAULT_ALLOCATOR
 #define FTN_GET_DEFAULT_ALLOCATOR OMP_GET_DEFAULT_ALLOCATOR
-#define FTN_ALLOC OMP_ALLOC
-#define FTN_FREE OMP_FREE
 #define FTN_GET_DEVICE_NUM OMP_GET_DEVICE_NUM
 #define FTN_SET_AFFINITY_FORMAT OMP_SET_AFFINITY_FORMAT
 #define FTN_GET_AFFINITY_FORMAT OMP_GET_AFFINITY_FORMAT
@@ -405,6 +405,8 @@
 #define FTN_CAPTURE_AFFINITY OMP_CAPTURE_AFFINITY
 #define FTN_PAUSE_RESOURCE OMP_PAUSE_RESOURCE
 #define FTN_PAUSE_RESOURCE_ALL OMP_PAUSE_RESOURCE_ALL
+#define FTN_GET_SUPPORTED_ACTIVE_LEVELS OMP_GET_SUPPORTED_ACTIVE_LEVELS
+#define FTN_FULFILL_EVENT OMP_FULFILL_EVENT
 #endif
 
 #endif /* KMP_FTN_UPPER */
@@ -463,9 +465,7 @@
 #define FTN_GET_ANCESTOR_THREAD_NUM OMP_GET_ANCESTOR_THREAD_NUM_
 #define FTN_GET_TEAM_SIZE OMP_GET_TEAM_SIZE_
 #define FTN_IN_FINAL OMP_IN_FINAL_
-//  #define FTN_SET_PROC_BIND                    OMP_SET_PROC_BIND_
 #define FTN_GET_PROC_BIND OMP_GET_PROC_BIND_
-//  #define FTN_CURR_PROC_BIND                   OMP_CURR_PROC_BIND_
 #if OMP_40_ENABLED
 #define FTN_GET_NUM_TEAMS OMP_GET_NUM_TEAMS_
 #define FTN_GET_TEAM_NUM OMP_GET_TEAM_NUM_
@@ -525,6 +525,8 @@
 
 #if OMP_50_ENABLED
 #define FTN_CONTROL_TOOL OMP_CONTROL_TOOL_
+#define FTN_INIT_ALLOCATOR OMP_INIT_ALLOCATOR_
+#define FTN_DESTROY_ALLOCATOR OMP_DESTROY_ALLOCATOR_
 #define FTN_SET_DEFAULT_ALLOCATOR OMP_SET_DEFAULT_ALLOCATOR_
 #define FTN_GET_DEFAULT_ALLOCATOR OMP_GET_DEFAULT_ALLOCATOR_
 #define FTN_ALLOC OMP_ALLOC_
@@ -536,6 +538,8 @@
 #define FTN_CAPTURE_AFFINITY OMP_CAPTURE_AFFINITY_
 #define FTN_PAUSE_RESOURCE OMP_PAUSE_RESOURCE_
 #define FTN_PAUSE_RESOURCE_ALL OMP_PAUSE_RESOURCE_ALL_
+#define FTN_GET_SUPPORTED_ACTIVE_LEVELS OMP_GET_SUPPORTED_ACTIVE_LEVELS_
+#define FTN_FULFILL_EVENT OMP_FULFILL_EVENT_
 #endif
 
 #endif /* KMP_FTN_UAPPEND */
@@ -626,8 +630,6 @@
 #define KMP_API_NAME_GOMP_TASKYIELD GOMP_taskyield
 
 // All GOMP_4.0 symbols
-// TODO: As of 2013-10-14, none of the GOMP_4.0 functions are implemented in
-// libomp
 #define KMP_API_NAME_GOMP_BARRIER_CANCEL GOMP_barrier_cancel
 #define KMP_API_NAME_GOMP_CANCEL GOMP_cancel
 #define KMP_API_NAME_GOMP_CANCELLATION_POINT GOMP_cancellation_point

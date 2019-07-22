@@ -47,9 +47,6 @@ static std::unique_ptr<lto::LTO> createLTO() {
   C.Options.FunctionSections = true;
   C.Options.DataSections = true;
 
-  // Wasm currently only supports ThreadModel::Single
-  C.Options.ThreadModel = ThreadModel::Single;
-
   C.DisableVerify = Config->DisableVerify;
   C.DiagHandler = diagnosticHandler;
   C.OptLevel = Config->LTOO;
@@ -111,6 +108,11 @@ void BitcodeCompiler::add(BitcodeFile &F) {
                             (R.Prevailing && Sym->isExported());
     if (R.Prevailing)
       undefine(Sym);
+
+    // We tell LTO to not apply interprocedural optimization for wrapped
+    // (with --wrap) symbols because otherwise LTO would inline them while
+    // their values are still not final.
+    R.LinkerRedefined = !Sym->CanInline;
   }
   checkError(LTOObj->add(std::move(F.Obj), Resols));
 }

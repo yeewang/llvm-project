@@ -164,6 +164,12 @@ rarely have to include this file directly).
   efficient to use the ``InstVisitor`` class to dispatch over the instruction
   type directly.
 
+``isa_and_nonnull<>``:
+  The ``isa_and_nonnull<>`` operator works just like the ``isa<>`` operator,
+  except that it allows for a null pointer as an argument (which it then
+  returns false).  This can sometimes be useful, allowing you to combine several
+  null checks into one.
+
 ``cast_or_null<>``:
   The ``cast_or_null<>`` operator works just like the ``cast<>`` operator,
   except that it allows for a null pointer as an argument (which it then
@@ -1366,8 +1372,8 @@ these functions in your code in places you want to debug.
 
 Getting this to work requires a small amount of setup.  On Unix systems
 with X11, install the `graphviz <http://www.graphviz.org>`_ toolkit, and make
-sure 'dot' and 'gv' are in your path.  If you are running on Mac OS X, download
-and install the Mac OS X `Graphviz program
+sure 'dot' and 'gv' are in your path.  If you are running on macOS, download
+and install the macOS `Graphviz program
 <http://www.pixelglow.com/graphviz/>`_ and add
 ``/Applications/Graphviz.app/Contents/MacOS/`` (or wherever you install it) to
 your path. The programs need not be present when configuring, building or
@@ -2659,7 +2665,7 @@ Iterating over def-use & use-def chains
 
 Frequently, we might have an instance of the ``Value`` class (`doxygen
 <http://llvm.org/doxygen/classllvm_1_1Value.html>`__) and we want to determine
-which ``User`` s use the ``Value``.  The list of all ``User``\ s of a particular
+which ``User``\ s use the ``Value``.  The list of all ``User``\ s of a particular
 ``Value`` is called a *def-use* chain.  For example, let's say we have a
 ``Function*`` named ``F`` to a particular function ``foo``.  Finding all of the
 instructions that *use* ``foo`` is as simple as iterating over the *def-use*
@@ -3381,8 +3387,8 @@ compatible LLVM libraries built without it defined.  By default,
 turning on assertions also turns on `LLVM_ENABLE_ABI_BREAKING_CHECKS`
 so a default +Asserts build is not ABI compatible with a
 default -Asserts build.  Clients that want ABI compatibility
-between +Asserts and -Asserts builds should use the CMake or autoconf
-build systems to set `LLVM_ENABLE_ABI_BREAKING_CHECKS` independently
+between +Asserts and -Asserts builds should use the CMake build system
+to set `LLVM_ENABLE_ABI_BREAKING_CHECKS` independently
 of `LLVM_ENABLE_ASSERTIONS`.
 
 .. _coreclasses:

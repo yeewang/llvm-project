@@ -1,6 +1,6 @@
-// RUN: %clang_cc1 -verify -fopenmp %s
+// RUN: %clang_cc1 -verify -fopenmp %s -Wuninitialized
 
-// RUN: %clang_cc1 -verify -fopenmp-simd %s
+// RUN: %clang_cc1 -verify -fopenmp-simd %s -Wuninitialized
 
 int foo();
 
@@ -8,7 +8,7 @@ template<typename T, int N>
 int tmain(int argc, char **argv) { // expected-note {{declared here}}
   #pragma omp critical
   ;
-  #pragma omp critical untied // expected-error {{unexpected OpenMP clause 'untied' in directive '#pragma omp critical'}}
+  #pragma omp critical untied allocate(argc) // expected-error {{unexpected OpenMP clause 'untied' in directive '#pragma omp critical'}} expected-error {{unexpected OpenMP clause 'allocate' in directive '#pragma omp critical'}}
   #pragma omp critical unknown // expected-warning {{extra tokens at the end of '#pragma omp critical' are ignored}}
   #pragma omp critical ( // expected-error {{expected identifier}} expected-error {{expected ')'}} expected-note {{to match this '('}}
   #pragma omp critical ( + // expected-error {{expected identifier}} expected-error {{expected ')'}} expected-note {{to match this '('}}

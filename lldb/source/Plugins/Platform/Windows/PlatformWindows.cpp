@@ -125,8 +125,6 @@ void PlatformWindows::Initialize() {
 
   if (g_initialize_count++ == 0) {
 #if defined(_WIN32)
-    WSADATA dummy;
-    WSAStartup(MAKEWORD(2, 2), &dummy);
     // Force a host flag to true for the default platform object.
     PlatformSP default_platform_sp(new PlatformWindows(true));
     default_platform_sp->SetSystemArchitecture(HostInfo::GetArchitecture());
@@ -139,12 +137,9 @@ void PlatformWindows::Initialize() {
   }
 }
 
-void PlatformWindows::Terminate(void) {
+void PlatformWindows::Terminate() {
   if (g_initialize_count > 0) {
     if (--g_initialize_count == 0) {
-#ifdef _WIN32
-      WSACleanup();
-#endif
       PluginManager::UnregisterPlugin(PlatformWindows::CreateInstance);
     }
   }
@@ -152,17 +147,13 @@ void PlatformWindows::Terminate(void) {
   Platform::Terminate();
 }
 
-//------------------------------------------------------------------
 /// Default Constructor
-//------------------------------------------------------------------
 PlatformWindows::PlatformWindows(bool is_host) : RemoteAwarePlatform(is_host) {}
 
-//------------------------------------------------------------------
 /// Destructor.
 ///
 /// The destructor is virtual since this class is designed to be
 /// inherited from by the plug-in instance.
-//------------------------------------------------------------------
 PlatformWindows::~PlatformWindows() = default;
 
 Status PlatformWindows::ResolveExecutable(
@@ -197,8 +188,9 @@ Status PlatformWindows::ResolveExecutable(
     }
   } else {
     if (m_remote_platform_sp) {
-      error = GetCachedExecutable(resolved_module_spec, exe_module_sp, nullptr,
-                                  *m_remote_platform_sp);
+      error =
+          GetCachedExecutable(resolved_module_spec, exe_module_sp,
+                              module_search_paths_ptr, *m_remote_platform_sp);
     } else {
       // We may connect to a process and use the provided executable (Don't use
       // local $PATH).
@@ -233,7 +225,8 @@ Status PlatformWindows::ResolveExecutable(
                idx, resolved_module_spec.GetArchitecture());
            ++idx) {
         error = ModuleList::GetSharedModule(resolved_module_spec, exe_module_sp,
-                                            nullptr, nullptr, nullptr);
+                                            module_search_paths_ptr, nullptr,
+                                            nullptr);
         // Did we find an executable using one of the
         if (error.Success()) {
           if (exe_module_sp && exe_module_sp->GetObjectFile())
@@ -335,6 +328,14 @@ ProcessSP PlatformWindows::DebugProcess(ProcessLaunchInfo &launch_info,
   // plugin, and PlatformWindows::DebugProcess is just a pass-through to get to
   // the process plugin.
 
+  if (IsRemote()) {
+    if (m_remote_platform_sp)
+      return m_remote_platform_sp->DebugProcess(launch_info, debugger, target,
+                                                error);
+    else
+      error.SetErrorString("the platform is not currently connected");
+  }
+
   if (launch_info.GetProcessID() != LLDB_INVALID_PROCESS_ID) {
     // This is a process attach.  Don't need to launch anything.
     ProcessAttachInfo attach_info(launch_info);
@@ -392,34 +393,6 @@ lldb::ProcessSP PlatformWindows::Attach(ProcessAttachInfo &attach_info,
   return process_sp;
 }
 
-Status PlatformWindows::GetSharedModule(
-    const ModuleSpec &module_spec, Process *process, ModuleSP &module_sp,
-    const FileSpecList *module_search_paths_ptr, ModuleSP *old_module_sp_ptr,
-    bool *did_create_ptr) {
-  Status error;
-  module_sp.reset();
-
-  if (IsRemote()) {
-    // If we have a remote platform always, let it try and locate the shared
-    // module first.
-    if (m_remote_platform_sp) {
-      error = m_remote_platform_sp->GetSharedModule(
-          module_spec, process, module_sp, module_search_paths_ptr,
-          old_module_sp_ptr, did_create_ptr);
-    }
-  }
-
-  if (!module_sp) {
-    // Fall back to the local platform and find the file locally
-    error = Platform::GetSharedModule(module_spec, process, module_sp,
-                                      module_search_paths_ptr,
-                                      old_module_sp_ptr, did_create_ptr);
-  }
-  if (module_sp)
-    module_sp->SetPlatformFileSpec(module_spec.GetFileSpec());
-  return error;
-}
-
 bool PlatformWindows::GetSupportedArchitectureAtIndex(uint32_t idx,
                                                       ArchSpec &arch) {
   static SupportedArchList architectures;
@@ -435,7 +408,7 @@ void PlatformWindows::GetStatus(Stream &strm) {
 
 #ifdef _WIN32
   llvm::VersionTuple version = HostInfo::GetOSVersion();
-  strm << "Host: Windows " << version.getAsString() << '\n';
+  strm << "      Host: Windows " << version.getAsString() << '\n';
 #endif
 }
 

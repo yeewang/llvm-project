@@ -547,4 +547,357 @@ TEST_F(GISelMITest, WidenUSUBO) {
   // Check
   EXPECT_TRUE(CheckMachineFunction(*MF, CheckStr)) << *MF;
 }
+
+TEST_F(GISelMITest, FewerElementsAnd) {
+  if (!TM)
+    return;
+
+  const LLT V2S32 = LLT::vector(2, 32);
+  const LLT V5S32 = LLT::vector(5, 32);
+
+  // Declare your legalization info
+  DefineLegalizerInfo(A, {
+    getActionDefinitionsBuilder(G_AND)
+      .legalFor({s32});
+  });
+
+  auto Op0 = B.buildUndef(V5S32);
+  auto Op1 = B.buildUndef(V5S32);
+  auto And = B.buildAnd(V5S32, Op0, Op1);
+
+  AInfo Info(MF->getSubtarget());
+  DummyGISelObserver Observer;
+  LegalizerHelper Helper(*MF, Info, Observer, B);
+  EXPECT_TRUE(Helper.fewerElementsVector(*And, 0, V2S32) ==
+              LegalizerHelper::LegalizeResult::Legalized);
+
+  auto CheckStr = R"(
+  CHECK: [[IMP_DEF0:%[0-9]+]]:_(<5 x s32>) = G_IMPLICIT_DEF
+  CHECK: [[IMP_DEF1:%[0-9]+]]:_(<5 x s32>) = G_IMPLICIT_DEF
+  CHECK: [[IMP_DEF2:%[0-9]+]]:_(<5 x s32>) = G_IMPLICIT_DEF
+  CHECK: [[EXTRACT0:%[0-9]+]]:_(<2 x s32>) = G_EXTRACT [[IMP_DEF0]]:_(<5 x s32>), 0
+  CHECK: [[EXTRACT1:%[0-9]+]]:_(<2 x s32>) = G_EXTRACT [[IMP_DEF1]]:_(<5 x s32>), 0
+  CHECK: [[AND0:%[0-9]+]]:_(<2 x s32>) = G_AND [[EXTRACT0]]:_, [[EXTRACT1]]:_
+  CHECK: [[INSERT0:%[0-9]+]]:_(<5 x s32>) = G_INSERT [[IMP_DEF2]]:_, [[AND0]]:_(<2 x s32>), 0
+
+  CHECK: [[EXTRACT2:%[0-9]+]]:_(<2 x s32>) = G_EXTRACT [[IMP_DEF0]]:_(<5 x s32>), 64
+  CHECK: [[EXTRACT3:%[0-9]+]]:_(<2 x s32>) = G_EXTRACT [[IMP_DEF1]]:_(<5 x s32>), 64
+  CHECK: [[AND1:%[0-9]+]]:_(<2 x s32>) = G_AND [[EXTRACT2]]:_, [[EXTRACT3]]:_
+  CHECK: [[INSERT1:%[0-9]+]]:_(<5 x s32>) = G_INSERT [[INSERT0]]:_, [[AND1]]:_(<2 x s32>), 64
+
+  CHECK: [[EXTRACT4:%[0-9]+]]:_(s32) = G_EXTRACT [[IMP_DEF0]]:_(<5 x s32>), 128
+  CHECK: [[EXTRACT5:%[0-9]+]]:_(s32) = G_EXTRACT [[IMP_DEF1]]:_(<5 x s32>), 128
+  CHECK: [[AND2:%[0-9]+]]:_(s32) = G_AND [[EXTRACT4]]:_, [[EXTRACT5]]:_
+  CHECK: [[INSERT2:%[0-9]+]]:_(<5 x s32>) = G_INSERT [[INSERT1]]:_, [[AND2]]:_(s32), 128
+  )";
+
+  // Check
+  EXPECT_TRUE(CheckMachineFunction(*MF, CheckStr)) << *MF;
+}
+
+TEST_F(GISelMITest, MoreElementsAnd) {
+  if (!TM)
+    return;
+
+  LLT s32 = LLT::scalar(32);
+  LLT v2s32 = LLT::vector(2, 32);
+  LLT v6s32 = LLT::vector(6, 32);
+
+  LegalizerInfo LI;
+  LI.getActionDefinitionsBuilder(TargetOpcode::G_AND)
+    .legalFor({v6s32})
+    .clampMinNumElements(0, s32, 6);
+  LI.computeTables();
+
+  DummyGISelObserver Observer;
+  LegalizerHelper Helper(*MF, LI, Observer, B);
+
+  B.setInsertPt(*EntryMBB, EntryMBB->end());
+
+  auto Val0 = B.buildBitcast(v2s32, Copies[0]);
+  auto Val1 = B.buildBitcast(v2s32, Copies[1]);
+
+  auto And = B.buildAnd(v2s32, Val0, Val1);
+
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.moreElementsVector(*And, 0, v6s32));
+
+  auto CheckStr = R"(
+  CHECK: [[BITCAST0:%[0-9]+]]:_(<2 x s32>) = G_BITCAST
+  CHECK: [[BITCAST1:%[0-9]+]]:_(<2 x s32>) = G_BITCAST
+  CHECK: [[IMP_DEF0:%[0-9]+]]:_(<2 x s32>) = G_IMPLICIT_DEF
+  CHECK: [[CONCAT0:%[0-9]+]]:_(<6 x s32>) = G_CONCAT_VECTORS [[BITCAST0]]:_(<2 x s32>), [[IMP_DEF0]]:_(<2 x s32>), [[IMP_DEF0]]:_(<2 x s32>)
+  CHECK: [[IMP_DEF1:%[0-9]+]]:_(<2 x s32>) = G_IMPLICIT_DEF
+  CHECK: [[CONCAT1:%[0-9]+]]:_(<6 x s32>) = G_CONCAT_VECTORS [[BITCAST1]]:_(<2 x s32>), [[IMP_DEF1]]:_(<2 x s32>), [[IMP_DEF1]]:_(<2 x s32>)
+  CHECK: [[AND:%[0-9]+]]:_(<6 x s32>) = G_AND [[CONCAT0]]:_, [[CONCAT1]]:_
+  CHECK: (<2 x s32>) = G_EXTRACT [[AND]]:_(<6 x s32>), 0
+  )";
+
+  EXPECT_TRUE(CheckMachineFunction(*MF, CheckStr)) << *MF;
+}
+
+TEST_F(GISelMITest, FewerElementsPhi) {
+  if (!TM)
+    return;
+
+  LLT s1 = LLT::scalar(1);
+  LLT s32 = LLT::scalar(32);
+  LLT s64 = LLT::scalar(64);
+  LLT v2s32 = LLT::vector(2, 32);
+  LLT v5s32 = LLT::vector(5, 32);
+
+  LegalizerInfo LI;
+  LI.getActionDefinitionsBuilder(TargetOpcode::G_PHI)
+    .legalFor({v2s32})
+    .clampMinNumElements(0, s32, 2);
+  LI.computeTables();
+
+  LLT PhiTy = v5s32;
+  DummyGISelObserver Observer;
+  LegalizerHelper Helper(*MF, LI, Observer, B);
+  B.setMBB(*EntryMBB);
+
+  MachineBasicBlock *MidMBB = MF->CreateMachineBasicBlock();
+  MachineBasicBlock *EndMBB = MF->CreateMachineBasicBlock();
+  MF->insert(MF->end(), MidMBB);
+  MF->insert(MF->end(), EndMBB);
+
+  EntryMBB->addSuccessor(MidMBB);
+  EntryMBB->addSuccessor(EndMBB);
+  MidMBB->addSuccessor(EndMBB);
+
+  auto InitVal = B.buildUndef(PhiTy);
+  auto InitOtherVal = B.buildConstant(s64, 999);
+
+  auto ICmp = B.buildICmp(CmpInst::ICMP_EQ, s1, Copies[0], Copies[1]);
+  B.buildBrCond(ICmp.getReg(0), *MidMBB);
+  B.buildBr(*EndMBB);
+
+
+  B.setMBB(*MidMBB);
+  auto MidVal = B.buildUndef(PhiTy);
+  auto MidOtherVal = B.buildConstant(s64, 345);
+  B.buildBr(*EndMBB);
+
+  B.setMBB(*EndMBB);
+  auto Phi = B.buildInstr(TargetOpcode::G_PHI)
+    .addDef(MRI->createGenericVirtualRegister(PhiTy))
+    .addUse(InitVal.getReg(0))
+    .addMBB(EntryMBB)
+    .addUse(MidVal.getReg(0))
+    .addMBB(MidMBB);
+
+  // Insert another irrelevant phi to make sure the rebuild is inserted after
+  // it.
+  B.buildInstr(TargetOpcode::G_PHI)
+    .addDef(MRI->createGenericVirtualRegister(s64))
+    .addUse(InitOtherVal.getReg(0))
+    .addMBB(EntryMBB)
+    .addUse(MidOtherVal.getReg(0))
+    .addMBB(MidMBB);
+
+  // Add some use instruction after the phis.
+  B.buildAnd(PhiTy, Phi.getReg(0), Phi.getReg(0));
+
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.fewerElementsVector(*Phi, 0, v2s32));
+
+  auto CheckStr = R"(
+  CHECK: [[INITVAL:%[0-9]+]]:_(<5 x s32>) = G_IMPLICIT_DEF
+  CHECK: [[EXTRACT0:%[0-9]+]]:_(<2 x s32>) = G_EXTRACT [[INITVAL]]:_(<5 x s32>), 0
+  CHECK: [[EXTRACT1:%[0-9]+]]:_(<2 x s32>) = G_EXTRACT [[INITVAL]]:_(<5 x s32>), 64
+  CHECK: [[EXTRACT2:%[0-9]+]]:_(s32) = G_EXTRACT [[INITVAL]]:_(<5 x s32>), 128
+  CHECK: G_BRCOND
+
+  CHECK: [[MIDVAL:%[0-9]+]]:_(<5 x s32>) = G_IMPLICIT_DEF
+  CHECK: [[EXTRACT3:%[0-9]+]]:_(<2 x s32>) = G_EXTRACT [[MIDVAL]]:_(<5 x s32>), 0
+  CHECK: [[EXTRACT4:%[0-9]+]]:_(<2 x s32>) = G_EXTRACT [[MIDVAL]]:_(<5 x s32>), 64
+  CHECK: [[EXTRACT5:%[0-9]+]]:_(s32) = G_EXTRACT [[MIDVAL]]:_(<5 x s32>), 128
+  CHECK: G_BR
+
+  CHECK: [[PHI0:%[0-9]+]]:_(<2 x s32>) = G_PHI [[EXTRACT0]]:_(<2 x s32>), %bb.0, [[EXTRACT3]]:_(<2 x s32>), %bb.1
+  CHECK: [[PHI1:%[0-9]+]]:_(<2 x s32>) = G_PHI [[EXTRACT1]]:_(<2 x s32>), %bb.0, [[EXTRACT4]]:_(<2 x s32>), %bb.1
+  CHECK: [[PHI2:%[0-9]+]]:_(s32) = G_PHI [[EXTRACT2]]:_(s32), %bb.0, [[EXTRACT5]]:_(s32), %bb.1
+
+  CHECK: [[OTHER_PHI:%[0-9]+]]:_(s64) = G_PHI
+  CHECK: [[REBUILD_VAL_IMPDEF:%[0-9]+]]:_(<5 x s32>) = G_IMPLICIT_DEF
+  CHECK: [[INSERT0:%[0-9]+]]:_(<5 x s32>) = G_INSERT [[REBUILD_VAL_IMPDEF]]:_, [[PHI0]]:_(<2 x s32>), 0
+  CHECK: [[INSERT1:%[0-9]+]]:_(<5 x s32>) = G_INSERT [[INSERT0]]:_, [[PHI1]]:_(<2 x s32>), 64
+  CHECK: [[INSERT2:%[0-9]+]]:_(<5 x s32>) = G_INSERT [[INSERT1]]:_, [[PHI2]]:_(s32), 128
+  CHECK: [[USE_OP:%[0-9]+]]:_(<5 x s32>) = G_AND [[INSERT2]]:_, [[INSERT2]]:_
+  )";
+
+  EXPECT_TRUE(CheckMachineFunction(*MF, CheckStr)) << *MF;
+}
+
+// FNEG expansion in terms of FSUB
+TEST_F(GISelMITest, LowerFNEG) {
+  if (!TM)
+    return;
+
+  // Declare your legalization info
+  DefineLegalizerInfo(A, {
+    getActionDefinitionsBuilder(G_FSUB).legalFor({s64});
+  });
+
+  // Build Instr. Make sure FMF are preserved.
+  auto FAdd =
+    B.buildInstr(TargetOpcode::G_FADD, {LLT::scalar(64)}, {Copies[0], Copies[1]},
+                 MachineInstr::MIFlag::FmNsz);
+
+  // Should not propagate the flags of src instruction.
+  auto FNeg0 =
+    B.buildInstr(TargetOpcode::G_FNEG, {LLT::scalar(64)}, {FAdd.getReg(0)},
+                 {MachineInstr::MIFlag::FmArcp});
+
+  // Preserve the one flag.
+  auto FNeg1 =
+    B.buildInstr(TargetOpcode::G_FNEG, {LLT::scalar(64)}, {Copies[0]},
+                 MachineInstr::MIFlag::FmNoInfs);
+
+  AInfo Info(MF->getSubtarget());
+  DummyGISelObserver Observer;
+  LegalizerHelper Helper(*MF, Info, Observer, B);
+  // Perform Legalization
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.lower(*FNeg0, 0, LLT::scalar(64)));
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.lower(*FNeg1, 0, LLT::scalar(64)));
+
+  auto CheckStr = R"(
+  CHECK: [[FADD:%[0-9]+]]:_(s64) = nsz G_FADD %0:_, %1:_
+  CHECK: [[CONST0:%[0-9]+]]:_(s64) = G_FCONSTANT double -0.000000e+00
+  CHECK: [[FSUB0:%[0-9]+]]:_(s64) = arcp G_FSUB [[CONST0]]:_, [[FADD]]:_
+  CHECK: [[CONST1:%[0-9]+]]:_(s64) = G_FCONSTANT double -0.000000e+00
+  CHECK: [[FSUB1:%[0-9]+]]:_(s64) = ninf G_FSUB [[CONST1]]:_, %0:_
+  )";
+
+  // Check
+  EXPECT_TRUE(CheckMachineFunction(*MF, CheckStr)) << *MF;
+}
+
+TEST_F(GISelMITest, LowerMinMax) {
+  if (!TM)
+    return;
+
+  LLT s64 = LLT::scalar(64);
+  LLT v2s32 = LLT::vector(2, 32);
+
+  DefineLegalizerInfo(A, {
+    getActionDefinitionsBuilder({G_SMIN, G_SMAX, G_UMIN, G_UMAX})
+      .lowerFor({s64, LLT::vector(2, s32)});
+  });
+
+  auto SMin = B.buildSMin(s64, Copies[0], Copies[1]);
+  auto SMax = B.buildSMax(s64, Copies[0], Copies[1]);
+  auto UMin = B.buildUMin(s64, Copies[0], Copies[1]);
+  auto UMax = B.buildUMax(s64, Copies[0], Copies[1]);
+
+  auto VecVal0 = B.buildBitcast(v2s32, Copies[0]);
+  auto VecVal1 = B.buildBitcast(v2s32, Copies[1]);
+
+  auto SMinV = B.buildSMin(v2s32, VecVal0, VecVal1);
+  auto SMaxV = B.buildSMax(v2s32, VecVal0, VecVal1);
+  auto UMinV = B.buildUMin(v2s32, VecVal0, VecVal1);
+  auto UMaxV = B.buildUMax(v2s32, VecVal0, VecVal1);
+
+  AInfo Info(MF->getSubtarget());
+  DummyGISelObserver Observer;
+  LegalizerHelper Helper(*MF, Info, Observer, B);
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.lower(*SMin, 0, s64));
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.lower(*SMax, 0, s64));
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.lower(*UMin, 0, s64));
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.lower(*UMax, 0, s64));
+
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.lower(*SMinV, 0, v2s32));
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.lower(*SMaxV, 0, v2s32));
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.lower(*UMinV, 0, v2s32));
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.lower(*UMaxV, 0, v2s32));
+
+  auto CheckStr = R"(
+  CHECK: [[CMP0:%[0-9]+]]:_(s1) = G_ICMP intpred(slt), %0:_(s64), %1:_
+  CHECK: [[SMIN:%[0-9]+]]:_(s64) = G_SELECT [[CMP0]]:_(s1), %0:_, %1:_
+
+  CHECK: [[CMP1:%[0-9]+]]:_(s1) = G_ICMP intpred(sgt), %0:_(s64), %1:_
+  CHECK: [[SMAX:%[0-9]+]]:_(s64) = G_SELECT [[CMP1]]:_(s1), %0:_, %1:_
+
+  CHECK: [[CMP2:%[0-9]+]]:_(s1) = G_ICMP intpred(ult), %0:_(s64), %1:_
+  CHECK: [[UMIN:%[0-9]+]]:_(s64) = G_SELECT [[CMP2]]:_(s1), %0:_, %1:_
+
+  CHECK: [[CMP3:%[0-9]+]]:_(s1) = G_ICMP intpred(ugt), %0:_(s64), %1:_
+  CHECK: [[UMAX:%[0-9]+]]:_(s64) = G_SELECT [[CMP3]]:_(s1), %0:_, %1:_
+
+  CHECK: [[VEC0:%[0-9]+]]:_(<2 x s32>) = G_BITCAST %0:_(s64)
+  CHECK: [[VEC1:%[0-9]+]]:_(<2 x s32>) = G_BITCAST %1:_(s64)
+
+  CHECK: [[VCMP0:%[0-9]+]]:_(<2 x s1>) = G_ICMP intpred(slt), [[VEC0]]:_(<2 x s32>), [[VEC1]]:_
+  CHECK: [[SMINV:%[0-9]+]]:_(<2 x s32>) = G_SELECT [[VCMP0]]:_(<2 x s1>), [[VEC0]]:_, [[VEC1]]:_
+
+  CHECK: [[VCMP1:%[0-9]+]]:_(<2 x s1>) = G_ICMP intpred(sgt), [[VEC0]]:_(<2 x s32>), [[VEC1]]:_
+  CHECK: [[SMAXV:%[0-9]+]]:_(<2 x s32>) = G_SELECT [[VCMP1]]:_(<2 x s1>), [[VEC0]]:_, [[VEC1]]:_
+
+  CHECK: [[VCMP2:%[0-9]+]]:_(<2 x s1>) = G_ICMP intpred(ult), [[VEC0]]:_(<2 x s32>), [[VEC1]]:_
+  CHECK: [[UMINV:%[0-9]+]]:_(<2 x s32>) = G_SELECT [[VCMP2]]:_(<2 x s1>), [[VEC0]]:_, [[VEC1]]:_
+
+  CHECK: [[VCMP3:%[0-9]+]]:_(<2 x s1>) = G_ICMP intpred(ugt), [[VEC0]]:_(<2 x s32>), [[VEC1]]:_
+  CHECK: [[UMAXV:%[0-9]+]]:_(<2 x s32>) = G_SELECT [[VCMP3]]:_(<2 x s1>), [[VEC0]]:_, [[VEC1]]:_
+  )";
+
+  EXPECT_TRUE(CheckMachineFunction(*MF, CheckStr)) << *MF;
+}
+
+TEST_F(GISelMITest, WidenScalarBuildVector) {
+  if (!TM)
+    return;
+
+  LLT S32 = LLT::scalar(32);
+  LLT S16 = LLT::scalar(16);
+  LLT V2S16 = LLT::vector(2, S16);
+  LLT V2S32 = LLT::vector(2, S32);
+
+  DefineLegalizerInfo(A, {
+    getActionDefinitionsBuilder({G_SMIN, G_SMAX, G_UMIN, G_UMAX})
+      .lowerFor({s64, LLT::vector(2, s32)});
+  });
+
+  AInfo Info(MF->getSubtarget());
+  DummyGISelObserver Observer;
+  LegalizerHelper Helper(*MF, Info, Observer, B);
+  B.setInsertPt(*EntryMBB, EntryMBB->end());
+
+  Register Constant0 = B.buildConstant(S16, 1).getReg(0);
+  Register Constant1 = B.buildConstant(S16, 2).getReg(0);
+  auto BV0 = B.buildBuildVector(V2S16, {Constant0, Constant1});
+  auto BV1 = B.buildBuildVector(V2S16, {Constant0, Constant1});
+
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.widenScalar(*BV0, 0, V2S32));
+  EXPECT_EQ(LegalizerHelper::LegalizeResult::Legalized,
+            Helper.widenScalar(*BV1, 1, S32));
+
+  auto CheckStr = R"(
+  CHECK: [[K0:%[0-9]+]]:_(s16) = G_CONSTANT i16 1
+  CHECK-NEXT: [[K1:%[0-9]+]]:_(s16) = G_CONSTANT i16 2
+  CHECK-NEXT: [[EXT_K0_0:%[0-9]+]]:_(s32) = G_ANYEXT [[K0]]
+  CHECK-NEXT: [[EXT_K1_0:%[0-9]+]]:_(s32) = G_ANYEXT [[K1]]
+  CHECK-NEXT: [[BV0:%[0-9]+]]:_(<2 x s32>) = G_BUILD_VECTOR [[EXT_K0_0]]:_(s32), [[EXT_K1_0]]:_(s32)
+  CHECK-NEXT: [[BV0_TRUNC:%[0-9]+]]:_(<2 x s16>) = G_TRUNC [[BV0]]
+
+  CHECK: [[EXT_K0_1:%[0-9]+]]:_(s32) = G_ANYEXT [[K0]]
+  CHECK-NEXT: [[EXT_K1_1:%[0-9]+]]:_(s32) = G_ANYEXT [[K1]]
+
+  CHECK-NEXT: [[BV1:%[0-9]+]]:_(<2 x s16>) = G_BUILD_VECTOR_TRUNC [[EXT_K0_1]]:_(s32), [[EXT_K1_1]]:_(s32)
+  )";
+
+  EXPECT_TRUE(CheckMachineFunction(*MF, CheckStr)) << *MF;
+}
+
 } // namespace

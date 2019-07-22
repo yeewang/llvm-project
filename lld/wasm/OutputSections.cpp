@@ -51,6 +51,8 @@ static StringRef sectionTypeToString(uint32_t SectionType) {
     return "CODE";
   case WASM_SEC_DATA:
     return "DATA";
+  case WASM_SEC_DATACOUNT:
+    return "DATACOUNT";
   default:
     fatal("invalid section type");
   }
@@ -77,10 +79,7 @@ void OutputSection::createHeader(size_t BodySize) {
       " total=" + Twine(getSize()));
 }
 
-CodeSection::CodeSection(ArrayRef<InputFunction *> Functions)
-    : OutputSection(WASM_SEC_CODE), Functions(Functions) {
-  assert(Functions.size() > 0);
-
+void CodeSection::finalizeContents() {
   raw_string_ostream OS(CodeSectionHeader);
   writeUleb128(OS, Functions.size(), "function count");
   OS.flush();
@@ -110,14 +109,14 @@ void CodeSection::writeTo(uint8_t *Buf) {
   memcpy(Buf, CodeSectionHeader.data(), CodeSectionHeader.size());
 
   // Write code section bodies
-  parallelForEach(Functions,
-                  [&](const InputChunk *Chunk) { Chunk->writeTo(Buf); });
+  for (const InputChunk *Chunk : Functions)
+    Chunk->writeTo(Buf);
 }
 
-uint32_t CodeSection::numRelocations() const {
+uint32_t CodeSection::getNumRelocations() const {
   uint32_t Count = 0;
   for (const InputChunk *Func : Functions)
-    Count += Func->NumRelocations();
+    Count += Func->getNumRelocations();
   return Count;
 }
 
@@ -126,34 +125,39 @@ void CodeSection::writeRelocations(raw_ostream &OS) const {
     C->writeRelocations(OS);
 }
 
-DataSection::DataSection(ArrayRef<OutputSegment *> Segments)
-    : OutputSection(WASM_SEC_DATA), Segments(Segments) {
+void DataSection::finalizeContents() {
   raw_string_ostream OS(DataSectionHeader);
 
   writeUleb128(OS, Segments.size(), "data segment count");
   OS.flush();
   BodySize = DataSectionHeader.size();
 
+  assert((!Config->Pic || Segments.size() <= 1) &&
+         "Currenly only a single data segment is supported in PIC mode");
+
   for (OutputSegment *Segment : Segments) {
     raw_string_ostream OS(Segment->Header);
-    writeUleb128(OS, 0, "memory index");
-    WasmInitExpr InitExpr;
-    if (Config->Pic) {
-      assert(Segments.size() <= 1 &&
-             "Currenly only a single data segment is supported in PIC mode");
-      InitExpr.Opcode = WASM_OPCODE_GLOBAL_GET;
-      InitExpr.Value.Global = WasmSym::MemoryBase->getGlobalIndex();
-    } else {
-      InitExpr.Opcode = WASM_OPCODE_I32_CONST;
-      InitExpr.Value.Int32 = Segment->StartVA;
+    writeUleb128(OS, Segment->InitFlags, "init flags");
+    if (Segment->InitFlags & WASM_SEGMENT_HAS_MEMINDEX)
+      writeUleb128(OS, 0, "memory index");
+    if ((Segment->InitFlags & WASM_SEGMENT_IS_PASSIVE) == 0) {
+      WasmInitExpr InitExpr;
+      if (Config->Pic) {
+        InitExpr.Opcode = WASM_OPCODE_GLOBAL_GET;
+        InitExpr.Value.Global = WasmSym::MemoryBase->getGlobalIndex();
+      } else {
+        InitExpr.Opcode = WASM_OPCODE_I32_CONST;
+        InitExpr.Value.Int32 = Segment->StartVA;
+      }
+      writeInitExpr(OS, InitExpr);
     }
-    writeInitExpr(OS, InitExpr);
     writeUleb128(OS, Segment->Size, "segment size");
     OS.flush();
 
     Segment->SectionOffset = BodySize;
     BodySize += Segment->Header.size() + Segment->Size;
-    log("Data segment: size=" + Twine(Segment->Size));
+    log("Data segment: size=" + Twine(Segment->Size) + ", startVA=" +
+        Twine::utohexstr(Segment->StartVA) + ", name=" + Segment->Name);
 
     for (InputSegment *InputSeg : Segment->InputSegments)
       InputSeg->OutputOffset = Segment->SectionOffset + Segment->Header.size() +
@@ -175,7 +179,7 @@ void DataSection::writeTo(uint8_t *Buf) {
   // Write data section headers
   memcpy(Buf, DataSectionHeader.data(), DataSectionHeader.size());
 
-  parallelForEach(Segments, [&](const OutputSegment *Segment) {
+  for (const OutputSegment *Segment : Segments) {
     // Write data segment header
     uint8_t *SegStart = Buf + Segment->SectionOffset;
     memcpy(SegStart, Segment->Header.data(), Segment->Header.size());
@@ -183,14 +187,14 @@ void DataSection::writeTo(uint8_t *Buf) {
     // Write segment data payload
     for (const InputChunk *Chunk : Segment->InputSegments)
       Chunk->writeTo(Buf);
-  });
+  }
 }
 
-uint32_t DataSection::numRelocations() const {
+uint32_t DataSection::getNumRelocations() const {
   uint32_t Count = 0;
   for (const OutputSegment *Seg : Segments)
     for (const InputChunk *InputSeg : Seg->InputSegments)
-      Count += InputSeg->NumRelocations();
+      Count += InputSeg->getNumRelocations();
   return Count;
 }
 
@@ -200,10 +204,7 @@ void DataSection::writeRelocations(raw_ostream &OS) const {
       C->writeRelocations(OS);
 }
 
-CustomSection::CustomSection(std::string Name,
-                             ArrayRef<InputSection *> InputSections)
-    : OutputSection(WASM_SEC_CUSTOM, Name), PayloadSize(0),
-      InputSections(InputSections) {
+void CustomSection::finalizeContents() {
   raw_string_ostream OS(NameData);
   encodeULEB128(Name.size(), OS);
   OS << Name;
@@ -211,6 +212,7 @@ CustomSection::CustomSection(std::string Name,
 
   for (InputSection *Section : InputSections) {
     Section->OutputOffset = PayloadSize;
+    Section->OutputSec = this;
     PayloadSize += Section->getSize();
   }
 
@@ -231,14 +233,14 @@ void CustomSection::writeTo(uint8_t *Buf) {
   Buf += NameData.size();
 
   // Write custom sections payload
-  parallelForEach(InputSections,
-                  [&](const InputSection *Section) { Section->writeTo(Buf); });
+  for (const InputSection *Section : InputSections)
+    Section->writeTo(Buf);
 }
 
-uint32_t CustomSection::numRelocations() const {
+uint32_t CustomSection::getNumRelocations() const {
   uint32_t Count = 0;
   for (const InputSection *InputSect : InputSections)
-    Count += InputSect->NumRelocations();
+    Count += InputSect->getNumRelocations();
   return Count;
 }
 

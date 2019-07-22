@@ -35,19 +35,17 @@ class InputSegment;
 // There is one add* function per symbol type.
 class SymbolTable {
 public:
+  void wrap(Symbol *Sym, Symbol *Real, Symbol *Wrap);
+
   void addFile(InputFile *File);
+
   void addCombinedLTOObject();
-
-  std::vector<ObjFile *> ObjectFiles;
-  std::vector<BitcodeFile *> BitcodeFiles;
-  std::vector<InputFunction *> SyntheticFunctions;
-  std::vector<InputGlobal *> SyntheticGlobals;
-
-  void reportRemainingUndefines();
 
   ArrayRef<Symbol *> getSymbols() const { return SymVector; }
 
   Symbol *find(StringRef Name);
+
+  void replace(StringRef Name, Symbol* Sym);
 
   void trace(StringRef Name);
 
@@ -63,7 +61,8 @@ public:
 
   Symbol *addUndefinedFunction(StringRef Name, StringRef ImportName,
                                StringRef ImportModule, uint32_t Flags,
-                               InputFile *File, const WasmSignature *Signature);
+                               InputFile *File, const WasmSignature *Signature,
+                               bool IsCalledDirectly);
   Symbol *addUndefinedData(StringRef Name, uint32_t Flags, InputFile *File);
   Symbol *addUndefinedGlobal(StringRef Name, StringRef ImportName,
                              StringRef ImportModule,  uint32_t Flags,
@@ -78,13 +77,24 @@ public:
                                     InputGlobal *Global);
   DefinedFunction *addSyntheticFunction(StringRef Name, uint32_t Flags,
                                         InputFunction *Function);
+  DefinedData *addOptionalDataSymbol(StringRef Name, uint32_t Value = 0,
+                                     uint32_t Flags = 0);
 
+  void handleSymbolVariants();
   void handleWeakUndefines();
+
+  std::vector<ObjFile *> ObjectFiles;
+  std::vector<SharedFile *> SharedFiles;
+  std::vector<BitcodeFile *> BitcodeFiles;
+  std::vector<InputFunction *> SyntheticFunctions;
+  std::vector<InputGlobal *> SyntheticGlobals;
 
 private:
   std::pair<Symbol *, bool> insert(StringRef Name, const InputFile *File);
   std::pair<Symbol *, bool> insertName(StringRef Name);
 
+  bool getFunctionVariant(Symbol* Sym, const WasmSignature *Sig,
+                          const InputFile *File, Symbol **Out);
   InputFunction *replaceWithUnreachable(Symbol *Sym, const WasmSignature &Sig,
                                         StringRef DebugName);
 
@@ -94,7 +104,14 @@ private:
   llvm::DenseMap<llvm::CachedHashStringRef, int> SymMap;
   std::vector<Symbol *> SymVector;
 
-  llvm::DenseSet<llvm::CachedHashStringRef> Comdats;
+  // For certain symbols types, e.g. function symbols, we allow for muliple
+  // variants of the same symbol with different signatures.
+  llvm::DenseMap<llvm::CachedHashStringRef, std::vector<Symbol *>> SymVariants;
+
+  // Comdat groups define "link once" sections. If two comdat groups have the
+  // same name, only one of them is linked, and the other is ignored. This set
+  // is used to uniquify them.
+  llvm::DenseSet<llvm::CachedHashStringRef> ComdatGroups;
 
   // For LTO.
   std::unique_ptr<BitcodeCompiler> LTO;

@@ -61,10 +61,12 @@ using namespace lldb_private;
 
 static sig_atomic_t g_signal_flags[NSIG];
 
+#ifndef SIGNAL_POLLING_UNSUPPORTED
 static void SignalHandler(int signo, siginfo_t *info, void *) {
   assert(signo < NSIG);
   g_signal_flags[signo] = 1;
 }
+#endif
 
 class MainLoop::RunImpl {
 public:
@@ -107,8 +109,14 @@ Status MainLoop::RunImpl::Poll() {
   num_events = kevent(loop.m_kqueue, in_events.data(), in_events.size(),
                       out_events, llvm::array_lengthof(out_events), nullptr);
 
-  if (num_events < 0)
-    return Status("kevent() failed with error %d\n", num_events);
+  if (num_events < 0) {
+    if (errno == EINTR) {
+      // in case of EINTR, let the main loop run one iteration
+      // we need to zero num_events to avoid assertions failing
+      num_events = 0;
+    } else
+      return Status(errno, eErrorTypePOSIX);
+  }
   return Status();
 }
 
@@ -382,9 +390,6 @@ Status MainLoop::Run() {
       return error;
 
     impl.ProcessEvents();
-
-    if (m_terminate_request)
-      return Status();
   }
   return Status();
 }

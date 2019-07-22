@@ -79,7 +79,7 @@ void ListFilesInDirRecursive(const std::string &Dir, long *Epoch,
 }
 
 
-void IterateDirRecurisve(const std::string &Dir,
+void IterateDirRecursive(const std::string &Dir,
                          void (*DirPreCallback)(const std::string &Dir),
                          void (*DirPostCallback)(const std::string &Dir),
                          void (*FileCallback)(const std::string &Dir)) {
@@ -94,7 +94,7 @@ void IterateDirRecurisve(const std::string &Dir,
     else if ((E->d_type == DT_DIR ||
              (E->d_type == DT_UNKNOWN && IsDirectory(Path))) &&
              *E->d_name != '.')
-      IterateDirRecurisve(Path, DirPreCallback, DirPostCallback, FileCallback);
+      IterateDirRecursive(Path, DirPreCallback, DirPostCallback, FileCallback);
   }
   closedir(D);
   DirPostCallback(Dir);
@@ -118,6 +118,10 @@ int DuplicateFile(int Fd) {
 
 void RemoveFile(const std::string &Path) {
   unlink(Path.c_str());
+}
+
+void RenameFile(const std::string &OldPath, const std::string &NewPath) {
+  rename(OldPath.c_str(), NewPath.c_str());
 }
 
 void DiscardOutput(int Fd) {
@@ -168,6 +172,11 @@ void MkDir(const std::string &Path) {
 
 void RmDir(const std::string &Path) {
   rmdir(Path.c_str());
+}
+
+const std::string &getDevNull() {
+  static const std::string devNull = "/dev/null";
+  return devNull;
 }
 
 }  // namespace fuzzer

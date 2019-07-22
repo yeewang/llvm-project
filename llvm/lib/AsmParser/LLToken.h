@@ -37,6 +37,7 @@ enum Kind {
   bar,     // |
   colon,   // :
 
+  kw_vscale,
   kw_x,
   kw_true,
   kw_false,
@@ -113,6 +114,7 @@ enum Kind {
   kw_align,
   kw_addrspace,
   kw_section,
+  kw_partition,
   kw_alias,
   kw_ifunc,
   kw_module,
@@ -193,6 +195,7 @@ enum Kind {
   kw_nobuiltin,
   kw_nocapture,
   kw_noduplicate,
+  kw_nofree,
   kw_noimplicitfloat,
   kw_noinline,
   kw_norecurse,
@@ -224,8 +227,10 @@ enum Kind {
   kw_swifterror,
   kw_swiftself,
   kw_uwtable,
+  kw_willreturn,
   kw_writeonly,
   kw_zeroext,
+  kw_immarg,
 
   kw_type,
   kw_opaque,
@@ -363,6 +368,7 @@ enum Kind {
   kw_notEligibleToImport,
   kw_live,
   kw_dsoLocal,
+  kw_canAutoHide,
   kw_function,
   kw_insts,
   kw_funcFlags,
@@ -379,6 +385,8 @@ enum Kind {
   kw_critical,
   kw_relbf,
   kw_variable,
+  kw_vTableFuncs,
+  kw_virtFunc,
   kw_aliasee,
   kw_refs,
   kw_typeIdInfo,
@@ -391,6 +399,7 @@ enum Kind {
   kw_offset,
   kw_args,
   kw_typeid,
+  kw_typeidCompatibleVTable,
   kw_summary,
   kw_typeTestRes,
   kw_kind,
@@ -421,6 +430,7 @@ enum Kind {
   kw_varFlags,
 
   // Unsigned Valued tokens (UIntVal).
+  LabelID,    // 42:
   GlobalID,   // @42
   LocalVarID, // %42
   AttrGrpID,  // #42

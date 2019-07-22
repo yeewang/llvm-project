@@ -23,9 +23,7 @@ public:
 
   static void Terminate();
 
-  //------------------------------------------------------------
   // lldb_private::PluginInterface functions
-  //------------------------------------------------------------
   static lldb::PlatformSP CreateInstance(bool force,
                                          const lldb_private::ArchSpec *arch);
 
@@ -37,9 +35,7 @@ public:
 
   uint32_t GetPluginVersion() override { return 1; }
 
-  //------------------------------------------------------------
   // lldb_private::Platform functions
-  //------------------------------------------------------------
   Status
   ResolveExecutable(const lldb_private::ModuleSpec &module_spec,
                     lldb::ModuleSP &module_sp,
@@ -62,13 +58,6 @@ public:
                          lldb_private::Debugger &debugger,
                          lldb_private::Target *target,
                          lldb_private::Status &error) override;
-
-  lldb_private::Status
-  GetSharedModule(const lldb_private::ModuleSpec &module_spec,
-                  lldb_private::Process *process, lldb::ModuleSP &module_sp,
-                  const lldb_private::FileSpecList *module_search_paths_ptr,
-                  lldb::ModuleSP *old_module_sp_ptr,
-                  bool *did_create_ptr) override;
 
   bool GetSupportedArchitectureAtIndex(uint32_t idx,
                                        lldb_private::ArchSpec &arch) override;

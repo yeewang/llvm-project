@@ -114,7 +114,7 @@ ScheduleDAGInstrs::ScheduleDAGInstrs(MachineFunction &mf,
     : ScheduleDAG(mf), MLI(mli), MFI(mf.getFrameInfo()),
       RemoveKillFlags(RemoveKillFlags),
       UnknownValue(UndefValue::get(
-                             Type::getVoidTy(mf.getFunction().getContext()))) {
+                             Type::getVoidTy(mf.getFunction().getContext()))), Topo(SUnits, &ExitSU) {
   DbgValues.clear();
 
   const TargetSubtargetInfo &ST = mf.getSubtarget();
@@ -712,6 +712,7 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
   AAForDep = UseAA ? AA : nullptr;
 
   BarrierChain = nullptr;
+  SUnit *FPBarrierChain = nullptr;
 
   this->TrackLaneMasks = TrackLaneMasks;
   MISUnitMap.clear();
@@ -871,7 +872,19 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
       addBarrierChain(NonAliasStores);
       addBarrierChain(NonAliasLoads);
 
+      // Add dependency against previous FP barrier and reset FP barrier.
+      if (FPBarrierChain)
+        FPBarrierChain->addPredBarrier(BarrierChain);
+      FPBarrierChain = BarrierChain;
+
       continue;
+    }
+
+    // Instructions that may raise FP exceptions depend on each other.
+    if (MI.mayRaiseFPException()) {
+      if (FPBarrierChain)
+        FPBarrierChain->addPredBarrier(SU);
+      FPBarrierChain = SU;
     }
 
     // If it's not a store or a variant load, we're done.
@@ -968,6 +981,8 @@ void ScheduleDAGInstrs::buildSchedGraph(AliasAnalysis *AA,
   Uses.clear();
   CurrentVRegDefs.clear();
   CurrentVRegUses.clear();
+
+  Topo.MarkDirty();
 }
 
 raw_ostream &llvm::operator<<(raw_ostream &OS, const PseudoSourceValue* PSV) {
@@ -1089,22 +1104,21 @@ void ScheduleDAGInstrs::fixupKills(MachineBasicBlock &MBB) {
     if (!MI.isBundled()) {
       toggleKills(MRI, LiveRegs, MI, true);
     } else {
-      MachineBasicBlock::instr_iterator First = MI.getIterator();
-      if (MI.isBundle()) {
+      MachineBasicBlock::instr_iterator Bundle = MI.getIterator();
+      if (MI.isBundle())
         toggleKills(MRI, LiveRegs, MI, false);
-        ++First;
-      }
+
       // Some targets make the (questionable) assumtion that the instructions
       // inside the bundle are ordered and consequently only the last use of
       // a register inside the bundle can kill it.
-      MachineBasicBlock::instr_iterator I = std::next(First);
+      MachineBasicBlock::instr_iterator I = std::next(Bundle);
       while (I->isBundledWithSucc())
         ++I;
       do {
         if (!I->isDebugInstr())
           toggleKills(MRI, LiveRegs, *I, true);
         --I;
-      } while(I != First);
+      } while (I != Bundle);
     }
   }
 }
@@ -1144,6 +1158,23 @@ std::string ScheduleDAGInstrs::getGraphNodeLabel(const SUnit *SU) const {
 /// contains multiple scheduling regions. But it is fine for visualization.
 std::string ScheduleDAGInstrs::getDAGName() const {
   return "dag." + BB->getFullName();
+}
+
+bool ScheduleDAGInstrs::canAddEdge(SUnit *SuccSU, SUnit *PredSU) {
+  return SuccSU == &ExitSU || !Topo.IsReachable(PredSU, SuccSU);
+}
+
+bool ScheduleDAGInstrs::addEdge(SUnit *SuccSU, const SDep &PredDep) {
+  if (SuccSU != &ExitSU) {
+    // Do not use WillCreateCycle, it assumes SD scheduling.
+    // If Pred is reachable from Succ, then the edge creates a cycle.
+    if (Topo.IsReachable(PredDep.getSUnit(), SuccSU))
+      return false;
+    Topo.AddPredQueued(SuccSU, PredDep.getSUnit());
+  }
+  SuccSU->addPred(PredDep, /*Required=*/!PredDep.isArtificial());
+  // Return true regardless of whether a new edge needed to be inserted.
+  return true;
 }
 
 //===----------------------------------------------------------------------===//
