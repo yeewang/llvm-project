@@ -481,7 +481,7 @@ static Error replaceAndRemoveSections(const CopyConfig &Config, Object &Obj) {
     };
   }
 
-  if (Config.StripDebug) {
+  if (Config.StripDebug || Config.StripUnneeded) {
     RemovePred = [RemovePred](const SectionBase &Sec) {
       return RemovePred(Sec) || isDebugSection(Sec);
     };
