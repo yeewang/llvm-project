@@ -70,21 +70,30 @@ int main()
 
 #if (defined(__arm__) || defined(__aarch64__)) && defined(__ARM_FP)
     // Rounding mode tests on supported architectures
-    long double m = 1234.0L, n = 0.01L;
+    const long double m = 1234.02L, n = 0.01L;
+
     fesetround(FE_UPWARD);
-    if (__subtf3(m, n) != 1234.0L)
+    if (test__subtf3(m, n,
+                     UINT64_C(0x40093480a3d70a3d),
+                     UINT64_C(0x70a3d70a3d70a3d7)))
         return 1;
 
     fesetround(FE_DOWNWARD);
-    if (__subtf3(m, n) != 1233.0L)
+    if (test__subtf3(m, n,
+                     UINT64_C(0x40093480a3d70a3d),
+                     UINT64_C(0x70a3d70a3d70a3d6)))
         return 1;
 
     fesetround(FE_TOWARDZERO);
-    if (__subtf3(m, n) != 1233.0L)
+    if (test__subtf3(m, n,
+                     UINT64_C(0x40093480a3d70a3d),
+                     UINT64_C(0x70a3d70a3d70a3d6)))
         return 1;
 
     fesetround(FE_TONEAREST);
-    if (__subtf3(m, n) != 1234.0L)
+    if (test__subtf3(m, n,
+                     UINT64_C(0x40093480a3d70a3d),
+                     UINT64_C(0x70a3d70a3d70a3d7)))
         return 1;
 #endif
 

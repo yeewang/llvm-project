@@ -20,6 +20,12 @@
 
 #define AARCH64_INEXACT     0x10
 
+#ifndef __ARM_FP
+// For soft float targets, allow changing rounding mode by overriding the weak
+// __aarch64_fe_default_rmode symbol.
+FE_ROUND_MODE __attribute__((weak)) __aarch64_fe_default_rmode = FE_TONEAREST;
+#endif
+
 FE_ROUND_MODE __fe_getround() {
 #ifdef __ARM_FP
   uint64_t fpcr;
@@ -37,7 +43,7 @@ FE_ROUND_MODE __fe_getround() {
       return FE_TONEAREST;
   }
 #else
-  return FE_TONEAREST;
+  return __aarch64_fe_default_rmode;
 #endif
 }
 

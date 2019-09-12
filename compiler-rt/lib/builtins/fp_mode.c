@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file provides a default implementaion of fp_mode.h for architectures
+// This file provides a default implementation of fp_mode.h for architectures
 // that does not support or does not have an implementation of floating point
 // environment mode.
 //

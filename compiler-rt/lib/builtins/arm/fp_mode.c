@@ -20,6 +20,12 @@
 
 #define ARM_INEXACT     0x1000
 
+#ifndef __ARM_FP
+// For soft float targets, allow changing rounding mode by overriding the weak
+// __arm_fe_default_rmode symbol.
+FE_ROUND_MODE __attribute__((weak)) __arm_fe_default_rmode = FE_TONEAREST;
+#endif
+
 FE_ROUND_MODE __fe_getround() {
 #ifdef __ARM_FP
   uint32_t fpscr;
@@ -37,7 +43,7 @@ FE_ROUND_MODE __fe_getround() {
       return FE_TONEAREST;
   }
 #else
-  return FE_TONEAREST;
+  return __arm_fe_default_rmode;
 #endif
 }
 
