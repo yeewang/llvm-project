@@ -777,10 +777,8 @@ static bool tryToSpeculatePHIs(SmallVectorImpl<PHINode *> &PNs,
     // speculation if the predecessor is an invoke. This doesn't seem
     // fundamental and we should probably be splitting critical edges
     // differently.
-    const auto *TermInst = PredBB->getTerminator();
-    if (isa<IndirectBrInst>(TermInst) ||
-        isa<InvokeInst>(TermInst) ||
-        isa<CallBrInst>(TermInst)) {
+    if (isa<IndirectBrInst>(PredBB->getTerminator()) ||
+        isa<InvokeInst>(PredBB->getTerminator())) {
       LLVM_DEBUG(dbgs() << "  Invalid: predecessor terminator: "
                         << PredBB->getName() << "\n");
       return false;

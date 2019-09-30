@@ -121,7 +121,7 @@ ArrayRef<MCSymbol *> MMIAddrLabelMap::getAddrLabelSymbolToEmit(BasicBlock *BB) {
   BBCallbacks.back().setMap(this);
   Entry.Index = BBCallbacks.size() - 1;
   Entry.Fn = BB->getParent();
-  Entry.Symbols.push_back(Context.createTempSymbol(!BB->hasAddressTaken()));
+  Entry.Symbols.push_back(Context.createTempSymbol());
   return Entry.Symbols;
 }
 

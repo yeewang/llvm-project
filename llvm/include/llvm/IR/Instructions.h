@@ -3938,9 +3938,6 @@ class CallBrInst : public CallBase {
             ArrayRef<BasicBlock *> IndirectDests, ArrayRef<Value *> Args,
             ArrayRef<OperandBundleDef> Bundles, const Twine &NameStr);
 
-  /// Should the Indirect Destinations change, scan + update the Arg list.
-  void updateArgBlockAddresses(unsigned i, BasicBlock *B);
-
   /// Compute the number of operands to allocate.
   static int ComputeNumOperands(int NumArgs, int NumIndirectDests,
                                 int NumBundleInputs = 0) {
@@ -4078,7 +4075,7 @@ public:
     return cast<BasicBlock>(*(&Op<-1>() - getNumIndirectDests() - 1));
   }
   BasicBlock *getIndirectDest(unsigned i) const {
-    return cast_or_null<BasicBlock>(*(&Op<-1>() - getNumIndirectDests() + i));
+    return cast<BasicBlock>(*(&Op<-1>() - getNumIndirectDests() + i));
   }
   SmallVector<BasicBlock *, 16> getIndirectDests() const {
     SmallVector<BasicBlock *, 16> IndirectDests;
@@ -4090,7 +4087,6 @@ public:
     *(&Op<-1>() - getNumIndirectDests() - 1) = reinterpret_cast<Value *>(B);
   }
   void setIndirectDest(unsigned i, BasicBlock *B) {
-    updateArgBlockAddresses(i, B);
     *(&Op<-1>() - getNumIndirectDests() + i) = reinterpret_cast<Value *>(B);
   }
 
@@ -4100,10 +4096,11 @@ public:
     return i == 0 ? getDefaultDest() : getIndirectDest(i - 1);
   }
 
-  void setSuccessor(unsigned i, BasicBlock *NewSucc) {
-    assert(i < getNumIndirectDests() + 1 &&
+  void setSuccessor(unsigned idx, BasicBlock *NewSucc) {
+    assert(idx < getNumIndirectDests() + 1 &&
            "Successor # out of range for callbr!");
-    return i == 0 ? setDefaultDest(NewSucc) : setIndirectDest(i - 1, NewSucc);
+    *(&Op<-1>() - getNumIndirectDests() -1 + idx) =
+        reinterpret_cast<Value *>(NewSucc);
   }
 
   unsigned getNumSuccessors() const { return getNumIndirectDests() + 1; }

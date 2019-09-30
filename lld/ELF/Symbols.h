@@ -123,11 +123,6 @@ public:
   // doesn't know the final contents of the symbol.
   unsigned canInline : 1;
 
-  // Used by Undefined and SharedSymbol to track if there has been at least one
-  // undefined reference to the symbol. The binding may change to STB_WEAK if
-  // the first undefined reference from a non-shared object is weak.
-  unsigned referenced : 1;
-
   // True if this symbol is specified by --trace-symbol option.
   unsigned traced : 1;
 
@@ -230,9 +225,9 @@ protected:
         type(type), stOther(stOther), symbolKind(k), visibility(stOther & 3),
         isUsedInRegularObj(!file || file->kind() == InputFile::ObjKind),
         exportDynamic(isExportDynamic(k, visibility)), canInline(false),
-        referenced(false), traced(false), needsPltAddr(false), isInIplt(false),
-        gotInIgot(false), isPreemptible(false), used(!config->gcSections),
-        needsTocRestore(false), scriptDefined(false) {}
+        traced(false), needsPltAddr(false), isInIplt(false), gotInIgot(false),
+        isPreemptible(false), used(!config->gcSections), needsTocRestore(false),
+        scriptDefined(false) {}
 
 public:
   // True the symbol should point to its PLT entry.
@@ -368,6 +363,11 @@ public:
   uint64_t value; // st_value
   uint64_t size;  // st_size
   uint32_t alignment;
+
+  // This is true if there has been at least one undefined reference to the
+  // symbol. The binding may change to STB_WEAK if the first undefined reference
+  // is weak.
+  bool referenced = false;
 };
 
 // LazyArchive and LazyObject represent a symbols that is not yet in the link,
@@ -531,7 +531,6 @@ void Symbol::replace(const Symbol &New) {
   isUsedInRegularObj = old.isUsedInRegularObj;
   exportDynamic = old.exportDynamic;
   canInline = old.canInline;
-  referenced = old.referenced;
   traced = old.traced;
   isPreemptible = old.isPreemptible;
   scriptDefined = old.scriptDefined;

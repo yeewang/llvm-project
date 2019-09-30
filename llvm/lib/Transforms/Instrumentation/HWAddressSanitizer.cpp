@@ -1108,14 +1108,8 @@ bool HWAddressSanitizer::sanitizeFunction(Function &F) {
     uint64_t AlignedSize = alignTo(Size, Mapping.getAllocaAlignment());
     AI->setAlignment(std::max(AI->getAlignment(), 16u));
     if (Size != AlignedSize) {
-      Type *AllocatedType = AI->getAllocatedType();
-      if (AI->isArrayAllocation()) {
-        uint64_t ArraySize =
-            cast<ConstantInt>(AI->getArraySize())->getZExtValue();
-        AllocatedType = ArrayType::get(AllocatedType, ArraySize);
-      }
       Type *TypeWithPadding = StructType::get(
-          AllocatedType, ArrayType::get(Int8Ty, AlignedSize - Size));
+          AI->getAllocatedType(), ArrayType::get(Int8Ty, AlignedSize - Size));
       auto *NewAI = new AllocaInst(
           TypeWithPadding, AI->getType()->getAddressSpace(), nullptr, "", AI);
       NewAI->takeName(AI);
@@ -1123,8 +1117,10 @@ bool HWAddressSanitizer::sanitizeFunction(Function &F) {
       NewAI->setUsedWithInAlloca(AI->isUsedWithInAlloca());
       NewAI->setSwiftError(AI->isSwiftError());
       NewAI->copyMetadata(*AI);
-      auto *Bitcast = new BitCastInst(NewAI, AI->getType(), "", AI);
-      AI->replaceAllUsesWith(Bitcast);
+      Value *Zero = ConstantInt::get(Int32Ty, 0);
+      auto *GEP = GetElementPtrInst::Create(TypeWithPadding, NewAI,
+                                            {Zero, Zero}, "", AI);
+      AI->replaceAllUsesWith(GEP);
       AllocaToPaddedAllocaMap[AI] = NewAI;
     }
   }

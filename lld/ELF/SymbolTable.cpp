@@ -99,24 +99,6 @@ Symbol *SymbolTable::find(StringRef name) {
   return sym;
 }
 
-// This function takes care of the case in which shared libraries depend on
-// the user program (not the other way, which is usual). Shared libraries
-// may have undefined symbols, expecting that the user program provides
-// the definitions for them. An example is BSD's __progname symbol.
-// We need to put such symbols to the main program's .dynsym so that
-// shared libraries can find them.
-// Except this, we ignore undefined symbols in DSOs.
-template <class ELFT> void SymbolTable::scanShlibUndefined() {
-  for (InputFile *F : sharedFiles) {
-    for (StringRef U : F->getUndefinedSymbols()) {
-      Symbol *Sym = find(U);
-      if (!Sym || !Sym->isDefined())
-        continue;
-      Sym->exportDynamic = true;
-    }
-  }
-}
-
 // Initialize DemangledSyms with a map from demangled symbols to symbol
 // objects. Used to handle "extern C++" directive in version scripts.
 //
@@ -171,6 +153,20 @@ std::vector<Symbol *> SymbolTable::findAllByVersion(SymbolVersion ver) {
   return res;
 }
 
+// If there's only one anonymous version definition in a version
+// script file, the script does not actually define any symbol version,
+// but just specifies symbols visibilities.
+void SymbolTable::handleAnonymousVersion() {
+  for (SymbolVersion &ver : config->versionScriptGlobals)
+    assignExactVersion(ver, VER_NDX_GLOBAL, "global");
+  for (SymbolVersion &ver : config->versionScriptGlobals)
+    assignWildcardVersion(ver, VER_NDX_GLOBAL);
+  for (SymbolVersion &ver : config->versionScriptLocals)
+    assignExactVersion(ver, VER_NDX_LOCAL, "local");
+  for (SymbolVersion &ver : config->versionScriptLocals)
+    assignWildcardVersion(ver, VER_NDX_LOCAL);
+}
+
 // Handles -dynamic-list.
 void SymbolTable::handleDynamicList() {
   for (SymbolVersion &ver : config->dynamicList) {
@@ -205,14 +201,6 @@ void SymbolTable::assignExactVersion(SymbolVersion ver, uint16_t versionId,
     return;
   }
 
-  auto getName = [](uint16_t ver) -> std::string {
-    if (ver == VER_NDX_LOCAL)
-      return "VER_NDX_LOCAL";
-    if (ver == VER_NDX_GLOBAL)
-      return "VER_NDX_GLOBAL";
-    return ("version '" + config->versionDefinitions[ver - 2].name + "'").str();
-  };
-
   // Assign the version.
   for (Symbol *sym : syms) {
     // Skip symbols containing version info because symbol versions
@@ -221,13 +209,10 @@ void SymbolTable::assignExactVersion(SymbolVersion ver, uint16_t versionId,
     if (sym->getName().contains('@'))
       continue;
 
-    if (sym->versionId == config->defaultSymbolVersion)
-      sym->versionId = versionId;
-    if (sym->versionId == versionId)
-      continue;
-
-    warn("attempt to reassign symbol '" + ver.name + "' of " +
-         getName(sym->versionId) + " to " + getName(versionId));
+    if (sym->versionId != config->defaultSymbolVersion &&
+        sym->versionId != versionId)
+      error("duplicate symbol '" + ver.name + "' in version script");
+    sym->versionId = versionId;
   }
 }
 
@@ -245,27 +230,23 @@ void SymbolTable::assignWildcardVersion(SymbolVersion ver, uint16_t versionId) {
 
 // This function processes version scripts by updating VersionId
 // member of symbols.
-// If there's only one anonymous version definition in a version
-// script file, the script does not actually define any symbol version,
-// but just specifies symbols visibilities.
 void SymbolTable::scanVersionScript() {
+  // Handle edge cases first.
+  handleAnonymousVersion();
+  handleDynamicList();
+
+  // Now we have version definitions, so we need to set version ids to symbols.
+  // Each version definition has a glob pattern, and all symbols that match
+  // with the pattern get that version.
+
   // First, we assign versions to exact matching symbols,
   // i.e. version definitions not containing any glob meta-characters.
-  for (SymbolVersion &ver : config->versionScriptGlobals)
-    assignExactVersion(ver, VER_NDX_GLOBAL, "global");
-  for (SymbolVersion &ver : config->versionScriptLocals)
-    assignExactVersion(ver, VER_NDX_LOCAL, "local");
   for (VersionDefinition &v : config->versionDefinitions)
     for (SymbolVersion &ver : v.globals)
       assignExactVersion(ver, v.id, v.name);
 
   // Next, we assign versions to fuzzy matching symbols,
   // i.e. version definitions containing glob meta-characters.
-  for (SymbolVersion &ver : config->versionScriptGlobals)
-    assignWildcardVersion(ver, VER_NDX_GLOBAL);
-  for (SymbolVersion &ver : config->versionScriptLocals)
-    assignWildcardVersion(ver, VER_NDX_LOCAL);
-
   // Note that because the last match takes precedence over previous matches,
   // we iterate over the definitions in the reverse order.
   for (VersionDefinition &v : llvm::reverse(config->versionDefinitions))
@@ -277,15 +258,4 @@ void SymbolTable::scanVersionScript() {
   // Let them parse and update their names to exclude version suffix.
   for (Symbol *sym : symVector)
     sym->parseSymbolVersion();
-
-  // isPreemptible is false at this point. To correctly compute the binding of a
-  // Defined (which is used by includeInDynsym()), we need to know if it is
-  // VER_NDX_LOCAL or not. If defaultSymbolVersion is VER_NDX_LOCAL, we should
-  // compute symbol versions before handling --dynamic-list.
-  handleDynamicList();
 }
-
-template void SymbolTable::scanShlibUndefined<ELF32LE>();
-template void SymbolTable::scanShlibUndefined<ELF32BE>();
-template void SymbolTable::scanShlibUndefined<ELF64LE>();
-template void SymbolTable::scanShlibUndefined<ELF64BE>();

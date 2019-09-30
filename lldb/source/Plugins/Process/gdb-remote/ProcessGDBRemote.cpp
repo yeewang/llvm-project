@@ -1062,7 +1062,7 @@ Status ProcessGDBRemote::ConnectToDebugserver(llvm::StringRef connect_url) {
         if (retry_count >= max_retry_count)
           break;
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        usleep(100000);
       }
     }
   }
@@ -3629,8 +3629,7 @@ bool ProcessGDBRemote::MonitorDebugserverProcess(
   // Sleep for a half a second to make sure our inferior process has time to
   // set its exit status before we set it incorrectly when both the debugserver
   // and the inferior process shut down.
-  std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
+  usleep(500000);
   // If our process hasn't yet exited, debugserver might have died. If the
   // process did exit, then we are reaping it.
   const StateType state = process_sp->GetState();

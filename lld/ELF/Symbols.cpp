@@ -485,13 +485,17 @@ void Symbol::resolveUndefined(const Undefined &other) {
   if (dyn_cast_or_null<SharedFile>(other.file))
     return;
 
-  if (isUndefined() || isShared()) {
-    // The binding will be weak if there is at least one reference and all are
-    // weak. The binding has one opportunity to change to weak: if the first
-    // reference is weak.
-    if (other.binding != STB_WEAK || !referenced)
+  if (isUndefined()) {
+    // The binding may "upgrade" from weak to non-weak.
+    if (other.binding != STB_WEAK)
       binding = other.binding;
-    referenced = true;
+  } else if (auto *s = dyn_cast<SharedSymbol>(this)) {
+    // The binding of a SharedSymbol will be weak if there is at least one
+    // reference and all are weak. The binding has one opportunity to change to
+    // weak: if the first reference is weak.
+    if (other.binding != STB_WEAK || !s->referenced)
+      binding = other.binding;
+    s->referenced = true;
   }
 }
 
@@ -647,6 +651,6 @@ void Symbol::resolveShared(const SharedSymbol &other) {
     uint8_t bind = binding;
     replace(other);
     binding = bind;
-    referenced = true;
+    cast<SharedSymbol>(this)->referenced = true;
   }
 }

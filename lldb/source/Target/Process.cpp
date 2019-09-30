@@ -5027,7 +5027,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
 #ifdef LLDB_RUN_THREAD_HALT_WITH_EVENT
       // See comment above...
       if (miss_first_event) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        usleep(1000);
         miss_first_event = false;
         got_event = false;
       } else

@@ -6,8 +6,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "lldb/Host/Config.h"
-
 #include <stdio.h>
 #if HAVE_SYS_TYPES_H
 #include <sys/types.h>

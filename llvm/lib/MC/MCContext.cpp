@@ -61,7 +61,6 @@ MCContext::MCContext(const MCAsmInfo *mai, const MCRegisterInfo *mri,
                      bool DoAutoReset)
     : SrcMgr(mgr), InlineSrcMgr(nullptr), MAI(mai), MRI(mri), MOFI(mofi),
       Symbols(Allocator), UsedNames(Allocator),
-      InlineAsmUsedLabelNames(Allocator),
       CurrentDwarfLoc(0, 0, 0, DWARF2_FLAG_IS_STMT, 0, 0),
       AutoReset(DoAutoReset) {
   SecureLogFile = AsSecureLogFileName;
@@ -91,7 +90,6 @@ void MCContext::reset() {
   XCOFFAllocator.DestroyAll();
 
   MCSubtargetAllocator.DestroyAll();
-  InlineAsmUsedLabelNames.clear();
   UsedNames.clear();
   Symbols.clear();
   Allocator.Reset();
@@ -272,10 +270,6 @@ void MCContext::setSymbolValue(MCStreamer &Streamer,
                               uint64_t Val) {
   auto Symbol = getOrCreateSymbol(Sym);
   Streamer.EmitAssignment(Symbol, MCConstantExpr::create(Val, *this));
-}
-
-void MCContext::registerInlineAsmLabel(MCSymbol *Sym) {
-  InlineAsmUsedLabelNames[Sym->getName()] = Sym;
 }
 
 //===----------------------------------------------------------------------===//
