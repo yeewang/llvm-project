@@ -175,6 +175,19 @@ class SDBufferAtomic<string opcode> : SDNode <opcode,
   [SDNPMemOperand, SDNPHasChain, SDNPMayLoad, SDNPMayStore]
 >;
 
+class SDBufferAtomicNoRtn<string opcode, ValueType ty> : SDNode <opcode,
+  SDTypeProfile<0, 8,
+      [SDTCisVT<0, ty>,    // vdata
+       SDTCisVT<1, v4i32>, // rsrc
+       SDTCisVT<2, i32>,   // vindex(VGPR)
+       SDTCisVT<3, i32>,   // voffset(VGPR)
+       SDTCisVT<4, i32>,   // soffset(SGPR)
+       SDTCisVT<5, i32>,   // offset(imm)
+       SDTCisVT<6, i32>,   // cachepolicy(imm)
+       SDTCisVT<7, i1>]>,  // idxen(imm)
+  [SDNPMemOperand, SDNPHasChain, SDNPMayLoad, SDNPMayStore]
+>;
+
 def SIbuffer_atomic_swap : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_SWAP">;
 def SIbuffer_atomic_add : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_ADD">;
 def SIbuffer_atomic_sub : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_SUB">;
@@ -185,6 +198,10 @@ def SIbuffer_atomic_umax : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_UMAX">;
 def SIbuffer_atomic_and : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_AND">;
 def SIbuffer_atomic_or : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_OR">;
 def SIbuffer_atomic_xor : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_XOR">;
+def SIbuffer_atomic_inc : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_INC">;
+def SIbuffer_atomic_dec : SDBufferAtomic <"AMDGPUISD::BUFFER_ATOMIC_DEC">;
+def SIbuffer_atomic_fadd : SDBufferAtomicNoRtn <"AMDGPUISD::BUFFER_ATOMIC_FADD", f32>;
+def SIbuffer_atomic_pk_fadd : SDBufferAtomicNoRtn <"AMDGPUISD::BUFFER_ATOMIC_PK_FADD", v2f16>;
 
 def SIbuffer_atomic_cmpswap : SDNode <"AMDGPUISD::BUFFER_ATOMIC_CMPSWAP",
   SDTypeProfile<1, 9,
@@ -200,6 +217,16 @@ def SIbuffer_atomic_cmpswap : SDNode <"AMDGPUISD::BUFFER_ATOMIC_CMPSWAP",
      SDTCisVT<9, i1>]>,  // idxen(imm)
   [SDNPMemOperand, SDNPHasChain, SDNPMayLoad, SDNPMayStore]
 >;
+
+class SDGlobalAtomicNoRtn<string opcode, ValueType ty> : SDNode <opcode,
+  SDTypeProfile<0, 2,
+      [SDTCisPtrTy<0>,     // vaddr
+       SDTCisVT<1, ty>]>,  // vdata
+  [SDNPMemOperand, SDNPHasChain, SDNPMayLoad, SDNPMayStore]
+>;
+
+def SIglobal_atomic_fadd    : SDGlobalAtomicNoRtn <"AMDGPUISD::ATOMIC_FADD", f32>;
+def SIglobal_atomic_pk_fadd : SDGlobalAtomicNoRtn <"AMDGPUISD::ATOMIC_PK_FADD", v2f16>;
 
 def SIpc_add_rel_offset : SDNode<"AMDGPUISD::PC_ADD_REL_OFFSET",
   SDTypeProfile<1, 2, [SDTCisVT<0, iPTR>, SDTCisSameAs<0,1>, SDTCisSameAs<0,2>]>
@@ -239,6 +266,11 @@ def SIload_d16_hi_i8 : SDNode<"AMDGPUISD::LOAD_D16_HI_I8",
   [SDNPMayLoad, SDNPMemOperand, SDNPHasChain]
 >;
 
+def SIdenorm_mode : SDNode<"AMDGPUISD::DENORM_MODE",
+  SDTypeProfile<0 ,1, [SDTCisInt<0>]>,
+  [SDNPHasChain, SDNPSideEffect, SDNPOptInGlue, SDNPOutGlue]
+>;
+
 //===----------------------------------------------------------------------===//
 // ValueType helpers
 //===----------------------------------------------------------------------===//
@@ -275,14 +307,36 @@ class isPackedType<ValueType SrcVT> {
 // PatFrags for global memory operations
 //===----------------------------------------------------------------------===//
 
-defm atomic_inc_global : global_binary_atomic_op<SIatomic_inc>;
-defm atomic_dec_global : global_binary_atomic_op<SIatomic_dec>;
+foreach as = [ "global", "flat", "constant", "local", "private", "region" ] in {
+let AddressSpaces = !cast<AddressSpaceList>("LoadAddress_"#as).AddrSpaces in {
 
-def atomic_inc_local : local_binary_atomic_op<SIatomic_inc>;
-def atomic_dec_local : local_binary_atomic_op<SIatomic_dec>;
-def atomic_load_fadd_local : local_binary_atomic_op<atomic_load_fadd>;
-def atomic_load_fmin_local : local_binary_atomic_op<SIatomic_fmin>;
-def atomic_load_fmax_local : local_binary_atomic_op<SIatomic_fmax>;
+
+defm atomic_inc_#as : binary_atomic_op<SIatomic_inc>;
+defm atomic_dec_#as : binary_atomic_op<SIatomic_dec>;
+defm atomic_load_fmin_#as : binary_atomic_op<SIatomic_fmin, 0>;
+defm atomic_load_fmax_#as : binary_atomic_op<SIatomic_fmax, 0>;
+
+
+} // End let AddressSpaces = ...
+} // End foreach AddrSpace
+
+def atomic_fadd_global_noret : PatFrag<
+  (ops node:$ptr, node:$value),
+  (SIglobal_atomic_fadd node:$ptr, node:$value)> {
+  // FIXME: Move this
+  let MemoryVT = f32;
+  let IsAtomic = 1;
+  let AddressSpaces = StoreAddress_global.AddrSpaces;
+}
+
+def atomic_pk_fadd_global_noret : PatFrag<
+    (ops node:$ptr, node:$value),
+    (SIglobal_atomic_pk_fadd node:$ptr, node:$value)> {
+  // FIXME: Move this
+  let MemoryVT = v2f16;
+  let IsAtomic = 1;
+  let AddressSpaces = StoreAddress_global.AddrSpaces;
+}
 
 //===----------------------------------------------------------------------===//
 // SDNodes PatFrags for loads/stores with a glue input.
@@ -303,10 +357,12 @@ def AMDGPUatomic_ld_glue : SDNode <"ISD::ATOMIC_LOAD", SDTAtomicLoad,
 >;
 
 def unindexedload_glue : PatFrag <(ops node:$ptr), (AMDGPUld_glue node:$ptr)> {
+  let IsLoad = 1;
   let IsUnindexed = 1;
 }
 
 def load_glue : PatFrag <(ops node:$ptr), (unindexedload_glue node:$ptr)> {
+  let IsLoad = 1;
   let IsNonExtLoad = 1;
 }
 
@@ -322,14 +378,15 @@ def atomic_load_64_glue : PatFrag<(ops node:$ptr),
   let MemoryVT = i64;
 }
 
-def extload_glue : PatFrag<(ops node:$ptr), (load_glue node:$ptr)> {
+def extload_glue : PatFrag<(ops node:$ptr), (unindexedload_glue node:$ptr)> {
   let IsLoad = 1;
   let IsAnyExtLoad = 1;
 }
 
-def sextload_glue : PatFrag<(ops node:$ptr), (unindexedload_glue node:$ptr), [{
-  return cast<LoadSDNode>(N)->getExtensionType() == ISD::SEXTLOAD;
-}]>;
+def sextload_glue : PatFrag<(ops node:$ptr), (unindexedload_glue node:$ptr)> {
+  let IsLoad = 1;
+  let IsSignExtLoad = 1;
+}
 
 def zextload_glue : PatFrag<(ops node:$ptr), (unindexedload_glue node:$ptr)> {
   let IsLoad = 1;
@@ -366,23 +423,35 @@ def sextloadi16_glue : PatFrag<(ops node:$ptr), (sextload_glue node:$ptr)> {
   let MemoryVT = i16;
 }
 
-def load_glue_align8 : Aligned8Bytes <
-  (ops node:$ptr), (load_glue node:$ptr)
->;
-def load_glue_align16 : Aligned16Bytes <
-  (ops node:$ptr), (load_glue node:$ptr)
->;
 
+let IsLoad = 1, AddressSpaces = LoadAddress_local.AddrSpaces in {
+def load_local_m0 : PatFrag<(ops node:$ptr), (load_glue node:$ptr)> {
+  let IsNonExtLoad = 1;
+}
 
-def load_local_m0 : LoadFrag<load_glue>, LocalAddress;
-def sextloadi8_local_m0 : LoadFrag<sextloadi8_glue>, LocalAddress;
-def sextloadi16_local_m0 : LoadFrag<sextloadi16_glue>, LocalAddress;
-def extloadi8_local_m0 : LoadFrag<extloadi8_glue>, LocalAddress;
-def zextloadi8_local_m0 : LoadFrag<zextloadi8_glue>, LocalAddress;
-def extloadi16_local_m0 : LoadFrag<extloadi16_glue>, LocalAddress;
-def zextloadi16_local_m0 : LoadFrag<zextloadi16_glue>, LocalAddress;
-def load_align8_local_m0 : LoadFrag <load_glue_align8>, LocalAddress;
-def load_align16_local_m0 : LoadFrag <load_glue_align16>, LocalAddress;
+let MemoryVT = i8 in {
+def extloadi8_local_m0 : PatFrag<(ops node:$ptr), (extloadi8_glue node:$ptr)>;
+def sextloadi8_local_m0 : PatFrag<(ops node:$ptr), (sextloadi8_glue node:$ptr)>;
+def zextloadi8_local_m0 : PatFrag<(ops node:$ptr), (zextloadi8_glue node:$ptr)>;
+}
+
+let MemoryVT = i16 in {
+def extloadi16_local_m0 : PatFrag<(ops node:$ptr), (extloadi16_glue node:$ptr)>;
+def sextloadi16_local_m0 : PatFrag<(ops node:$ptr), (sextloadi16_glue node:$ptr)>;
+def zextloadi16_local_m0 : PatFrag<(ops node:$ptr), (zextloadi16_glue node:$ptr)>;
+}
+
+def load_align8_local_m0 : LoadFrag <load_glue>, LocalAddress {
+  let MinAlignment = 8;
+  let IsNonExtLoad = 1;
+}
+def load_align16_local_m0 : LoadFrag <load_glue>, LocalAddress {
+  let MinAlignment = 16;
+  let IsNonExtLoad = 1;
+}
+
+} // End IsLoad = 1
+
 def atomic_load_32_local_m0 : LoadFrag<atomic_load_32_glue>, LocalAddress;
 def atomic_load_64_local_m0 : LoadFrag<atomic_load_64_glue>, LocalAddress;
 
@@ -400,45 +469,70 @@ def atomic_store_glue : PatFrag<(ops node:$ptr, node:$val),
 }
 
 def unindexedstore_glue : PatFrag<(ops node:$val, node:$ptr),
-                                   (AMDGPUst_glue node:$val, node:$ptr), [{
-  return cast<StoreSDNode>(N)->getAddressingMode() == ISD::UNINDEXED;
-}]>;
+                                   (AMDGPUst_glue node:$val, node:$ptr)> {
+  let IsStore = 1;
+  let IsUnindexed = 1;
+}
 
 def store_glue : PatFrag<(ops node:$val, node:$ptr),
-                      (unindexedstore_glue node:$val, node:$ptr), [{
-  return !cast<StoreSDNode>(N)->isTruncatingStore();
-}]>;
+                         (unindexedstore_glue node:$val, node:$ptr)> {
+  let IsStore = 1;
+  let IsTruncStore = 0;
+}
 
 def truncstore_glue : PatFrag<(ops node:$val, node:$ptr),
-  (unindexedstore_glue node:$val, node:$ptr), [{
-  return cast<StoreSDNode>(N)->isTruncatingStore();
-}]>;
+  (unindexedstore_glue node:$val, node:$ptr)> {
+  let IsStore = 1;
+  let IsTruncStore = 1;
+}
 
 def truncstorei8_glue : PatFrag<(ops node:$val, node:$ptr),
-                           (truncstore_glue node:$val, node:$ptr), [{
-  return cast<StoreSDNode>(N)->getMemoryVT() == MVT::i8;
-}]>;
+                           (truncstore_glue node:$val, node:$ptr)> {
+  let IsStore = 1;
+  let MemoryVT = i8;
+}
 
 def truncstorei16_glue : PatFrag<(ops node:$val, node:$ptr),
-                           (truncstore_glue node:$val, node:$ptr), [{
-  return cast<StoreSDNode>(N)->getMemoryVT() == MVT::i16;
-}]>;
+                           (truncstore_glue node:$val, node:$ptr)> {
+  let IsStore = 1;
+  let MemoryVT = i16;
+}
 
-def store_glue_align8 : Aligned8Bytes <
-  (ops node:$value, node:$ptr), (store_glue node:$value, node:$ptr)
->;
+let IsStore = 1, AddressSpaces = StoreAddress_local.AddrSpaces in {
+def store_glue_align8 : PatFrag<(ops node:$val, node:$ptr),
+                                (store_glue node:$val, node:$ptr)>, Aligned<8>;
+def store_glue_align16 : PatFrag<(ops node:$val, node:$ptr),
+                                (store_glue node:$val, node:$ptr)>, Aligned<16>;
 
-def store_glue_align16 : Aligned16Bytes <
-  (ops node:$value, node:$ptr), (store_glue node:$value, node:$ptr)
->;
+def store_local_m0 : PatFrag<(ops node:$val, node:$ptr),
+                             (unindexedstore_glue node:$val, node:$ptr)> {
+  let IsStore = 1;
+  let IsTruncStore = 0;
+}
 
-def store_local_m0 : StoreFrag<store_glue>, LocalAddress;
-def truncstorei8_local_m0 : StoreFrag<truncstorei8_glue>, LocalAddress;
-def truncstorei16_local_m0 : StoreFrag<truncstorei16_glue>, LocalAddress;
+def truncstorei8_local_m0 : PatFrag<(ops node:$val, node:$ptr),
+                                    (unindexedstore_glue node:$val, node:$ptr)> {
+  let IsStore = 1;
+  let MemoryVT = i8;
+}
+
+
+def truncstorei16_local_m0 : PatFrag<(ops node:$val, node:$ptr),
+                                    (unindexedstore_glue node:$val, node:$ptr)> {
+  let IsStore = 1;
+  let MemoryVT = i16;
+}
+
+// FIXME: atomic store doesn't work.
 def atomic_store_local_m0 : StoreFrag<AMDGPUatomic_st_glue>, LocalAddress;
+def store_align8_local_m0 : StoreFrag<store_glue_align8>, LocalAddress {
+  let IsTruncStore = 0;
+}
 
-def store_align8_local_m0 : StoreFrag<store_glue_align8>, LocalAddress;
-def store_align16_local_m0 : StoreFrag<store_glue_align16>, LocalAddress;
+def store_align16_local_m0 : StoreFrag<store_glue_align16>, LocalAddress {
+  let IsTruncStore = 0;
+}
+}
 
 def si_setcc_uniform : PatFrag <
   (ops node:$lhs, node:$rhs, node:$cond),
@@ -515,15 +609,21 @@ def lshl_rev : PatFrag <
 >;
 
 multiclass SIAtomicM0Glue2 <string op_name, bit is_amdgpu = 0,
-                            SDTypeProfile tc = SDTAtomic2> {
+                            SDTypeProfile tc = SDTAtomic2,
+                            bit IsInt = 1> {
 
   def _glue : SDNode <
     !if(is_amdgpu, "AMDGPUISD", "ISD")#"::ATOMIC_"#op_name, tc,
     [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand, SDNPInGlue]
   >;
 
-  def _local_m0 : local_binary_atomic_op <!cast<SDNode>(NAME#"_glue")>;
-  def _region_m0 : region_binary_atomic_op <!cast<SDNode>(NAME#"_glue")>;
+  let AddressSpaces = StoreAddress_local.AddrSpaces in {
+    defm _local_m0 : binary_atomic_op <!cast<SDNode>(NAME#"_glue"), IsInt>;
+  }
+
+  let AddressSpaces = StoreAddress_region.AddrSpaces in {
+    defm _region_m0 : binary_atomic_op <!cast<SDNode>(NAME#"_glue"), IsInt>;
+  }
 }
 
 defm atomic_load_add : SIAtomicM0Glue2 <"LOAD_ADD">;
@@ -538,17 +638,9 @@ defm atomic_load_xor : SIAtomicM0Glue2 <"LOAD_XOR">;
 defm atomic_load_umin : SIAtomicM0Glue2 <"LOAD_UMIN">;
 defm atomic_load_umax : SIAtomicM0Glue2 <"LOAD_UMAX">;
 defm atomic_swap : SIAtomicM0Glue2 <"SWAP">;
-defm atomic_load_fadd : SIAtomicM0Glue2 <"LOAD_FADD", 0, SDTAtomic2_f32>;
-defm atomic_load_fmin : SIAtomicM0Glue2 <"LOAD_FMIN", 1, SDTAtomic2_f32>;
-defm atomic_load_fmax : SIAtomicM0Glue2 <"LOAD_FMAX", 1, SDTAtomic2_f32>;
-
-def atomic_cmp_swap_glue : SDNode <"ISD::ATOMIC_CMP_SWAP", SDTAtomic3,
-  [SDNPHasChain, SDNPMayStore, SDNPMayLoad, SDNPMemOperand, SDNPInGlue]
->;
-
-def atomic_cmp_swap_local_m0 : AtomicCmpSwapLocal<atomic_cmp_swap_glue>;
-def atomic_cmp_swap_region_m0 : AtomicCmpSwapRegion<atomic_cmp_swap_glue>;
-
+defm atomic_load_fadd : SIAtomicM0Glue2 <"LOAD_FADD", 0, SDTAtomic2_f32, 0>;
+defm atomic_load_fmin : SIAtomicM0Glue2 <"LOAD_FMIN", 1, SDTAtomic2_f32, 0>;
+defm atomic_load_fmax : SIAtomicM0Glue2 <"LOAD_FMAX", 1, SDTAtomic2_f32, 0>;
 
 def as_i1imm : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(N->getZExtValue(), SDLoc(N), MVT::i1);
@@ -597,8 +689,12 @@ class bitextract_imm<int bitnum> : SDNodeXForm<imm, [{
   return CurDAG->getTargetConstant(Bit, SDLoc(N), MVT::i1);
 }]>;
 
-def SIMM16bit : PatLeaf <(imm),
-  [{return isInt<16>(N->getSExtValue());}]
+def SIMM16bit : ImmLeaf <i32,
+  [{return isInt<16>(Imm);}]
+>;
+
+def UIMM16bit : ImmLeaf <i32,
+  [{return isUInt<16>(Imm);}]
 >;
 
 class InlineImm <ValueType vt> : PatLeaf <(vt imm), [{
@@ -1111,6 +1207,8 @@ def VOP3Mods  : ComplexPattern<untyped, 2, "SelectVOP3Mods">;
 def VOP3NoMods : ComplexPattern<untyped, 1, "SelectVOP3NoMods">;
 // VOP3Mods, but the input source is known to never be NaN.
 def VOP3Mods_nnan : ComplexPattern<fAny, 2, "SelectVOP3Mods_NNaN">;
+// VOP3Mods, but only allowed for f32 operands.
+def VOP3Mods_f32 : ComplexPattern<fAny, 2, "SelectVOP3Mods_f32">;
 
 def VOP3OMods : ComplexPattern<untyped, 3, "SelectVOP3OMods">;
 
@@ -1342,7 +1440,10 @@ class getVOPSrc0ForVT<ValueType VT> {
 // Returns the vreg register class to use for source operand given VT
 class getVregSrcForVT<ValueType VT> {
   RegisterClass ret = !if(!eq(VT.Size, 128), VReg_128,
-                        !if(!eq(VT.Size, 64), VReg_64, VGPR_32));
+                        !if(!eq(VT.Size, 96), VReg_96,
+                          !if(!eq(VT.Size, 64), VReg_64,
+                            !if(!eq(VT.Size, 48), VReg_64,
+                              VGPR_32))));
 }
 
 class getSDWASrcForVT <ValueType VT> {
@@ -2147,14 +2248,13 @@ def VOP_I32_V2I16_V2I16_I32 : VOPProfile <[i32, v2i16, v2i16, i32]>;
 
 def VOP_V4F32_F32_F32_V4F32       : VOPProfile <[v4f32,  f32,   f32,   v4f32]>;
 def VOP_V16F32_F32_F32_V16F32     : VOPProfile <[v16f32, f32,   f32,   v16f32]>;
-// TODO: define v32f32
-def VOP_V32F32_F32_F32_V32F32     : VOPProfile <[v32i32, f32,   f32,   v32i32]>;
+def VOP_V32F32_F32_F32_V32F32     : VOPProfile <[v32f32, f32,   f32,   v32f32]>;
 def VOP_V4F32_V4F16_V4F16_V4F32   : VOPProfile <[v4f32,  v4f16, v4f16, v4f32]>;
 def VOP_V16F32_V4F16_V4F16_V16F32 : VOPProfile <[v16f32, v4f16, v4f16, v16f32]>;
-def VOP_V32F32_V4F16_V4F16_V32F32 : VOPProfile <[v32i32, v4f16, v4f16, v32i32]>;
+def VOP_V32F32_V4F16_V4F16_V32F32 : VOPProfile <[v32f32, v4f16, v4f16, v32f32]>;
 def VOP_V4F32_V2I16_V2I16_V4F32   : VOPProfile <[v4f32,  v2i16, v2i16, v4f32]>;
 def VOP_V16F32_V2I16_V2I16_V16F32 : VOPProfile <[v16f32, v2i16, v2i16, v16f32]>;
-def VOP_V32F32_V2I16_V2I16_V32F32 : VOPProfile <[v32i32, v2i16, v2i16, v32i32]>;
+def VOP_V32F32_V2I16_V2I16_V32F32 : VOPProfile <[v32f32, v2i16, v2i16, v32f32]>;
 def VOP_V4I32_I32_I32_V4I32       : VOPProfile <[v4i32,  i32,   i32,   v4i32]>;
 def VOP_V16I32_I32_I32_V16I32     : VOPProfile <[v16i32, i32,   i32,   v16i32]>;
 def VOP_V32I32_I32_I32_V32I32     : VOPProfile <[v32i32, i32,   i32,   v32i32]>;

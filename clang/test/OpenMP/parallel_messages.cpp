@@ -5,6 +5,12 @@
 void foo() {
 }
 
+void xxx(int argc) {
+  int x; // expected-note {{initialize the variable 'x' to silence this warning}}
+#pragma omp parallel
+  argc = x; // expected-warning {{variable 'x' is uninitialized when used here}}
+}
+
 #pragma omp parallel // expected-error {{unexpected OpenMP directive '#pragma omp parallel'}}
 
 int a;
@@ -96,6 +102,6 @@ struct h {
 h operator<(h, h);
 void g::j() {
 #pragma omp parallel for default(none) if(a::b)
-  for (auto a = blocks.cbegin; a < blocks; ++a) // expected-error {{invalid operands to binary expression ('f' and 'int')}}
+  for (auto a = blocks.cbegin; a < blocks; ++a) // expected-error 2 {{invalid operands to binary expression ('f' and 'int')}}
     ;
 }

@@ -3,9 +3,6 @@
 from __future__ import print_function
 
 
-import os
-import sys
-import time
 import lldb
 from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
@@ -22,7 +19,6 @@ class SBFormattersAPITestCase(TestBase):
         self.line = line_number('main.cpp', '// Set break point at this line.')
 
     @add_test_categories(['pyapi'])
-    @expectedFailureNetBSD
     def test_formatters_api(self):
         """Test Python APIs for working with formatters"""
         self.build()

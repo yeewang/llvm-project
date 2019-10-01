@@ -153,7 +153,7 @@ public:
     assert(!ValueLoc && "Already initialized?");
     assert(!Value.getExpression()->isFragment() && "Fragments not supported.");
 
-    ValueLoc = llvm::make_unique<DbgValueLoc>(Value);
+    ValueLoc = std::make_unique<DbgValueLoc>(Value);
     if (auto *E = ValueLoc->getExpression())
       if (E->getNumElements())
         FrameIndexExprs.push_back({0, E});
@@ -257,14 +257,17 @@ public:
 /// Used for tracking debug info about call site parameters.
 class DbgCallSiteParam {
 private:
-  unsigned Register;
-  DbgValueLoc Value;
+  unsigned Register; ///< Parameter register at the callee entry point.
+  DbgValueLoc Value; ///< Corresponding location for the parameter value at
+                     ///< the call site.
 public:
   DbgCallSiteParam(unsigned Reg, DbgValueLoc Val)
-      : Register(Reg), Value(Val) {}
+      : Register(Reg), Value(Val) {
+    assert(Reg && "Parameter register cannot be undef");
+  }
 
-  unsigned getRegister() { return Register; }
-  DbgValueLoc getValue() { return Value; }
+  unsigned getRegister() const { return Register; }
+  DbgValueLoc getValue() const { return Value; }
 };
 
 /// Collection used for storing debug call site parameters.

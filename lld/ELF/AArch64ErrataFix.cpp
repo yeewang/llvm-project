@@ -398,9 +398,9 @@ lld::elf::Patch843419Section::Patch843419Section(InputSection *p, uint64_t off)
       patchee(p), patcheeOffset(off) {
   this->parent = p->getParent();
   patchSym = addSyntheticLocal(
-      Saver.save("__CortexA53843419_" + utohexstr(getLDSTAddr())), STT_FUNC, 0,
+      saver.save("__CortexA53843419_" + utohexstr(getLDSTAddr())), STT_FUNC, 0,
       getSize(), *this);
-  addSyntheticLocal(Saver.save("$x"), STT_NOTYPE, 0, 0, *this);
+  addSyntheticLocal(saver.save("$x"), STT_NOTYPE, 0, 0, *this);
 }
 
 uint64_t lld::elf::Patch843419Section::getLDSTAddr() const {
@@ -413,8 +413,8 @@ void lld::elf::Patch843419Section::writeTo(uint8_t *buf) {
   write32le(buf, read32le(patchee->data().begin() + patcheeOffset));
 
   // Apply any relocation transferred from the original PatcheeSection.
-  // For a SyntheticSection Buf already has OutSecOff added, but relocateAlloc
-  // also adds OutSecOff so we need to subtract to avoid double counting.
+  // For a SyntheticSection Buf already has outSecOff added, but relocateAlloc
+  // also adds outSecOff so we need to subtract to avoid double counting.
   this->relocateAlloc(buf - outSecOff, buf - outSecOff + getSize());
 
   // Return address is the next instruction after the one we have just copied.
@@ -427,7 +427,7 @@ void AArch64Err843419Patcher::init() {
   // The AArch64 ABI permits data in executable sections. We must avoid scanning
   // this data as if it were instructions to avoid false matches. We use the
   // mapping symbols in the InputObjects to identify this data, caching the
-  // results in SectionMap so we don't have to recalculate it each pass.
+  // results in sectionMap so we don't have to recalculate it each pass.
 
   // The ABI Section 4.5.4 Mapping symbols; defines local symbols that describe
   // half open intervals [Symbol Value, Next Symbol Value) of code and data
@@ -485,11 +485,11 @@ void AArch64Err843419Patcher::init() {
 void AArch64Err843419Patcher::insertPatches(
     InputSectionDescription &isd, std::vector<Patch843419Section *> &patches) {
   uint64_t isecLimit;
-  uint64_t prevISLimit = isd.sections.front()->outSecOff;
-  uint64_t patchUpperBound = prevISLimit + target->getThunkSectionSpacing();
+  uint64_t prevIsecLimit = isd.sections.front()->outSecOff;
+  uint64_t patchUpperBound = prevIsecLimit + target->getThunkSectionSpacing();
   uint64_t outSecAddr = isd.sections.front()->getParent()->addr;
 
-  // Set the OutSecOff of patches to the place where we want to insert them.
+  // Set the outSecOff of patches to the place where we want to insert them.
   // We use a similar strategy to Thunk placement. Place patches roughly
   // every multiple of maximum branch range.
   auto patchIt = patches.begin();
@@ -498,23 +498,23 @@ void AArch64Err843419Patcher::insertPatches(
     isecLimit = isec->outSecOff + isec->getSize();
     if (isecLimit > patchUpperBound) {
       while (patchIt != patchEnd) {
-        if ((*patchIt)->getLDSTAddr() - outSecAddr >= prevISLimit)
+        if ((*patchIt)->getLDSTAddr() - outSecAddr >= prevIsecLimit)
           break;
-        (*patchIt)->outSecOff = prevISLimit;
+        (*patchIt)->outSecOff = prevIsecLimit;
         ++patchIt;
       }
-      patchUpperBound = prevISLimit + target->getThunkSectionSpacing();
+      patchUpperBound = prevIsecLimit + target->getThunkSectionSpacing();
     }
-    prevISLimit = isecLimit;
+    prevIsecLimit = isecLimit;
   }
   for (; patchIt != patchEnd; ++patchIt) {
     (*patchIt)->outSecOff = isecLimit;
   }
 
-  // merge all patch sections. We use the OutSecOff assigned above to
+  // merge all patch sections. We use the outSecOff assigned above to
   // determine the insertion point. This is ok as we only merge into an
   // InputSectionDescription once per pass, and at the end of the pass
-  // assignAddresses() will recalculate all the OutSecOff values.
+  // assignAddresses() will recalculate all the outSecOff values.
   std::vector<InputSection *> tmp;
   tmp.reserve(isd.sections.size() + patches.size());
   auto mergeCmp = [](const InputSection *a, const InputSection *b) {
@@ -530,8 +530,8 @@ void AArch64Err843419Patcher::insertPatches(
   isd.sections = std::move(tmp);
 }
 
-// Given an erratum sequence that starts at address AdrpAddr, with an
-// instruction that we need to patch at PatcheeOffset from the start of
+// Given an erratum sequence that starts at address adrpAddr, with an
+// instruction that we need to patch at patcheeOffset from the start of
 // InputSection IS, create a Patch843419 Section and add it to the
 // Patches that we need to insert.
 static void implementPatch(uint64_t adrpAddr, uint64_t patcheeOffset,
@@ -587,10 +587,10 @@ AArch64Err843419Patcher::patchInputSectionDescription(
     //  LLD doesn't use the erratum sequence in SyntheticSections.
     if (isa<SyntheticSection>(isec))
       continue;
-    // Use SectionMap to make sure we only scan code and not inline data.
+    // Use sectionMap to make sure we only scan code and not inline data.
     // We have already sorted MapSyms in ascending order and removed consecutive
     // mapping symbols of the same type. Our range of executable instructions to
-    // scan is therefore [CodeSym->Value, DataSym->Value) or [CodeSym->Value,
+    // scan is therefore [codeSym->value, dataSym->value) or [codeSym->value,
     // section size).
     std::vector<const Defined *> &mapSyms = sectionMap[isec];
 

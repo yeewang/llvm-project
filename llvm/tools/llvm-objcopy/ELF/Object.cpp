@@ -397,7 +397,7 @@ void SectionWriter::visit(const OwnedDataSection &Sec) {
   llvm::copy(Sec.Data, Out.getBufferStart() + Sec.Offset);
 }
 
-static const std::vector<uint8_t> ZlibGnuMagic = {'Z', 'L', 'I', 'B'};
+static constexpr std::array<uint8_t, 4> ZlibGnuMagic = {'Z', 'L', 'I', 'B'};
 
 static bool isDataGnuCompressed(ArrayRef<uint8_t> Data) {
   return Data.size() > ZlibGnuMagic.size() &&
@@ -665,7 +665,7 @@ void SymbolTableSection::addSymbol(Twine Name, uint8_t Bind, uint8_t Type,
   Sym.Visibility = Visibility;
   Sym.Size = SymbolSize;
   Sym.Index = Symbols.size();
-  Symbols.emplace_back(llvm::make_unique<Symbol>(Sym));
+  Symbols.emplace_back(std::make_unique<Symbol>(Sym));
   Size += this->EntrySize;
 }
 
@@ -1161,11 +1161,12 @@ void BinaryELFBuilder::addData(SymbolTableSection *SymTab) {
   Twine Prefix = Twine("_binary_") + SanitizedFilename;
 
   SymTab->addSymbol(Prefix + "_start", STB_GLOBAL, STT_NOTYPE, &DataSection,
-                    /*Value=*/0, STV_DEFAULT, 0, 0);
+                    /*Value=*/0, NewSymbolVisibility, 0, 0);
   SymTab->addSymbol(Prefix + "_end", STB_GLOBAL, STT_NOTYPE, &DataSection,
-                    /*Value=*/DataSection.Size, STV_DEFAULT, 0, 0);
+                    /*Value=*/DataSection.Size, NewSymbolVisibility, 0, 0);
   SymTab->addSymbol(Prefix + "_size", STB_GLOBAL, STT_NOTYPE, nullptr,
-                    /*Value=*/DataSection.Size, STV_DEFAULT, SHN_ABS, 0);
+                    /*Value=*/DataSection.Size, NewSymbolVisibility, SHN_ABS,
+                    0);
 }
 
 std::unique_ptr<Object> BinaryELFBuilder::build() {
@@ -1610,7 +1611,7 @@ Writer::~Writer() {}
 Reader::~Reader() {}
 
 std::unique_ptr<Object> BinaryReader::create() const {
-  return BinaryELFBuilder(MInfo.EMachine, MemBuf).build();
+  return BinaryELFBuilder(MInfo.EMachine, MemBuf, NewSymbolVisibility).build();
 }
 
 Expected<std::vector<IHexRecord>> IHexReader::parse() const {
@@ -1645,7 +1646,7 @@ std::unique_ptr<Object> IHexReader::create() const {
 }
 
 std::unique_ptr<Object> ELFReader::create() const {
-  auto Obj = llvm::make_unique<Object>();
+  auto Obj = std::make_unique<Object>();
   if (auto *O = dyn_cast<ELFObjectFile<ELF32LE>>(Bin)) {
     ELFBuilder<ELF32LE> Builder(*O, *Obj, ExtractPartition);
     Builder.build();
@@ -1862,19 +1863,6 @@ void Object::sortSections() {
   });
 }
 
-static uint64_t alignToAddr(uint64_t Offset, uint64_t Addr, uint64_t Align) {
-  // Calculate Diff such that (Offset + Diff) & -Align == Addr & -Align.
-  if (Align == 0)
-    Align = 1;
-  auto Diff =
-      static_cast<int64_t>(Addr % Align) - static_cast<int64_t>(Offset % Align);
-  // We only want to add to Offset, however, so if Diff < 0 we can add Align and
-  // (Offset + Diff) & -Align == Addr & -Align will still hold.
-  if (Diff < 0)
-    Diff += Align;
-  return Offset + Diff;
-}
-
 // Orders segments such that if x = y->ParentSegment then y comes before x.
 static void orderSegments(std::vector<Segment *> &Segments) {
   llvm::stable_sort(Segments, compareSegmentsByOffset);
@@ -1902,8 +1890,8 @@ static uint64_t layoutSegments(std::vector<Segment *> &Segments,
       Seg->Offset =
           Parent->Offset + Seg->OriginalOffset - Parent->OriginalOffset;
     } else {
-      Offset = alignToAddr(Offset, Seg->VAddr, Seg->Align);
-      Seg->Offset = Offset;
+      Seg->Offset =
+          alignTo(Offset, std::max<uint64_t>(Seg->Align, 1), Seg->VAddr);
     }
     Offset = std::max(Offset, Seg->Offset + Seg->FileSize);
   }
@@ -2076,7 +2064,7 @@ template <class ELFT> Error ELFWriter<ELFT>::finalize() {
   // Also, the output arch may not be the same as the input arch, so fix up
   // size-related fields before doing layout calculations.
   uint64_t Index = 0;
-  auto SecSizer = llvm::make_unique<ELFSectionSizer<ELFT>>();
+  auto SecSizer = std::make_unique<ELFSectionSizer<ELFT>>();
   for (auto &Sec : Obj.sections()) {
     Sec.Index = Index++;
     Sec.accept(*SecSizer);
@@ -2114,7 +2102,7 @@ template <class ELFT> Error ELFWriter<ELFT>::finalize() {
 
   if (Error E = Buf.allocate(totalSize()))
     return E;
-  SecWriter = llvm::make_unique<ELFSectionWriter<ELFT>>(Buf);
+  SecWriter = std::make_unique<ELFSectionWriter<ELFT>>(Buf);
   return Error::success();
 }
 
@@ -2200,7 +2188,7 @@ Error BinaryWriter::finalize() {
 
   if (Error E = Buf.allocate(TotalSize))
     return E;
-  SecWriter = llvm::make_unique<BinarySectionWriter>(Buf);
+  SecWriter = std::make_unique<BinarySectionWriter>(Buf);
   return Error::success();
 }
 

@@ -76,13 +76,13 @@ static void readConfigs(opt::InputArgList &args);
 
 bool elf::link(ArrayRef<const char *> args, bool canExitEarly,
                raw_ostream &error) {
-  errorHandler().LogName = args::getFilenameWithoutExe(args[0]);
-  errorHandler().ErrorLimitExceededMsg =
+  errorHandler().logName = args::getFilenameWithoutExe(args[0]);
+  errorHandler().errorLimitExceededMsg =
       "too many errors emitted, stopping now (use "
       "-error-limit=0 to see all errors)";
-  errorHandler().ErrorOS = &error;
-  errorHandler().ExitEarly = canExitEarly;
-  errorHandler().ColorDiagnostics = error.has_colors();
+  errorHandler().errorOS = &error;
+  errorHandler().exitEarly = canExitEarly;
+  enableColors(error.has_colors());
 
   inputSections.clear();
   outputSections.clear();
@@ -272,7 +272,7 @@ void LinkerDriver::addFile(StringRef path, bool withLOption) {
 // Add a given library by searching it from input search paths.
 void LinkerDriver::addLibrary(StringRef name) {
   if (Optional<std::string> path = searchLibrary(name))
-    addFile(*path, /*WithLOption=*/true);
+    addFile(*path, /*withLOption=*/true);
   else
     error("unable to find library -l" + name);
 }
@@ -313,6 +313,9 @@ static void checkOptions() {
 
   if (!config->relocatable && !config->defineCommon)
     error("-no-define-common not supported in non relocatable output");
+
+  if (config->strip == StripPolicy::All && config->emitRelocs)
+    error("--strip-all and --emit-relocs may not be used together");
 
   if (config->zText && config->zIfuncNoplt)
     error("-z text and -z ifunc-noplt may not be used together");
@@ -378,9 +381,10 @@ static bool isKnownZFlag(StringRef s) {
          s == "execstack" || s == "global" || s == "hazardplt" ||
          s == "ifunc-noplt" || s == "initfirst" || s == "interpose" ||
          s == "keep-text-section-prefix" || s == "lazy" || s == "muldefs" ||
-         s == "nocombreloc" || s == "nocopyreloc" || s == "nodefaultlib" ||
-         s == "nodelete" || s == "nodlopen" || s == "noexecstack" ||
-         s == "nokeep-text-section-prefix" || s == "norelro" || s == "notext" ||
+         s == "separate-code" || s == "nocombreloc" || s == "nocopyreloc" ||
+         s == "nodefaultlib" || s == "nodelete" || s == "nodlopen" ||
+         s == "noexecstack" || s == "nokeep-text-section-prefix" ||
+         s == "norelro" || s == "noseparate-code" || s == "notext" ||
          s == "now" || s == "origin" || s == "relro" || s == "retpolineplt" ||
          s == "rodynamic" || s == "text" || s == "wxneeded" ||
          s.startswith("common-page-size") || s.startswith("max-page-size=") ||
@@ -399,7 +403,7 @@ void LinkerDriver::main(ArrayRef<const char *> argsArr) {
   opt::InputArgList args = parser.parse(argsArr.slice(1));
 
   // Interpret this flag early because error() depends on them.
-  errorHandler().ErrorLimit = args::getInteger(args, OPT_error_limit, 20);
+  errorHandler().errorLimit = args::getInteger(args, OPT_error_limit, 20);
   checkZOptions(args);
 
   // Handle -help
@@ -783,10 +787,12 @@ static void parseClangOption(StringRef opt, const Twine &msg) {
 
 // Initializes Config members by the command line options.
 static void readConfigs(opt::InputArgList &args) {
-  errorHandler().Verbose = args.hasArg(OPT_verbose);
-  errorHandler().FatalWarnings =
+  errorHandler().verbose = args.hasArg(OPT_verbose);
+  errorHandler().fatalWarnings =
       args.hasFlag(OPT_fatal_warnings, OPT_no_fatal_warnings, false);
-  ThreadsEnabled = args.hasFlag(OPT_threads, OPT_no_threads, true);
+  errorHandler().vsDiagnostics =
+      args.hasArg(OPT_visual_studio_diagnostics_format, false);
+  threadsEnabled = args.hasFlag(OPT_threads, OPT_no_threads, true);
 
   config->allowMultipleDefinition =
       args.hasFlag(OPT_allow_multiple_definition,
@@ -933,13 +939,14 @@ static void readConfigs(opt::InputArgList &args) {
   config->zRelro = getZFlag(args, "relro", "norelro", true);
   config->zRetpolineplt = hasZOption(args, "retpolineplt");
   config->zRodynamic = hasZOption(args, "rodynamic");
+  config->zSeparateCode = getZFlag(args, "separate-code", "noseparate-code", false);
   config->zStackSize = args::getZOptionValue(args, OPT_z, "stack-size", 0);
   config->zText = getZFlag(args, "text", "notext", true);
   config->zWxneeded = hasZOption(args, "wxneeded");
 
   // Parse LTO options.
   if (auto *arg = args.getLastArg(OPT_plugin_opt_mcpu_eq))
-    parseClangOption(Saver.save("-mcpu=" + StringRef(arg->getValue())),
+    parseClangOption(saver.save("-mcpu=" + StringRef(arg->getValue())),
                      arg->getSpelling());
 
   for (auto *arg : args.filtered(OPT_plugin_opt))
@@ -1007,30 +1014,33 @@ static void readConfigs(opt::InputArgList &args) {
     }
   }
 
+  assert(config->versionDefinitions.empty());
+  config->versionDefinitions.push_back({"local", (uint16_t)VER_NDX_LOCAL, {}});
+  config->versionDefinitions.push_back(
+      {"global", (uint16_t)VER_NDX_GLOBAL, {}});
+
   // If --retain-symbol-file is used, we'll keep only the symbols listed in
   // the file and discard all others.
   if (auto *arg = args.getLastArg(OPT_retain_symbols_file)) {
-    config->defaultSymbolVersion = VER_NDX_LOCAL;
+    config->versionDefinitions[VER_NDX_LOCAL].patterns.push_back(
+        {"*", /*isExternCpp=*/false, /*hasWildcard=*/true});
     if (Optional<MemoryBufferRef> buffer = readFile(arg->getValue()))
       for (StringRef s : args::getLines(*buffer))
-        config->versionScriptGlobals.push_back(
-            {s, /*IsExternCpp*/ false, /*HasWildcard*/ false});
+        config->versionDefinitions[VER_NDX_GLOBAL].patterns.push_back(
+            {s, /*isExternCpp=*/false, /*hasWildcard=*/false});
   }
-
-  bool hasExportDynamic =
-      args.hasFlag(OPT_export_dynamic, OPT_no_export_dynamic, false);
 
   // Parses -dynamic-list and -export-dynamic-symbol. They make some
   // symbols private. Note that -export-dynamic takes precedence over them
   // as it says all symbols should be exported.
-  if (!hasExportDynamic) {
+  if (!config->exportDynamic) {
     for (auto *arg : args.filtered(OPT_dynamic_list))
       if (Optional<MemoryBufferRef> buffer = readFile(arg->getValue()))
         readDynamicList(*buffer);
 
     for (auto *arg : args.filtered(OPT_export_dynamic_symbol))
       config->dynamicList.push_back(
-          {arg->getValue(), /*IsExternCpp*/ false, /*HasWildcard*/ false});
+          {arg->getValue(), /*isExternCpp=*/false, /*hasWildcard=*/false});
   }
 
   // If --export-dynamic-symbol=foo is given and symbol foo is defined in
@@ -1118,7 +1128,7 @@ void LinkerDriver::createFiles(opt::InputArgList &args) {
       addLibrary(arg->getValue());
       break;
     case OPT_INPUT:
-      addFile(arg->getValue(), /*WithLOption=*/false);
+      addFile(arg->getValue(), /*withLOption=*/false);
       break;
     case OPT_defsym: {
       StringRef from;
@@ -1255,7 +1265,7 @@ static uint64_t getCommonPageSize(opt::InputArgList &args) {
       warn("-z common-page-size set, but paging disabled by omagic or nmagic");
     return 1;
   }
-  // CommonPageSize can't be larger than MaxPageSize.
+  // commonPageSize can't be larger than maxPageSize.
   if (val > config->maxPageSize)
     val = config->maxPageSize;
   return val;
@@ -1263,7 +1273,7 @@ static uint64_t getCommonPageSize(opt::InputArgList &args) {
 
 // Parses -image-base option.
 static Optional<uint64_t> getImageBase(opt::InputArgList &args) {
-  // Because we are using "Config->MaxPageSize" here, this function has to be
+  // Because we are using "Config->maxPageSize" here, this function has to be
   // called after the variable is initialized.
   auto *arg = args.getLastArg(OPT_image_base);
   if (!arg)
@@ -1386,7 +1396,7 @@ static void replaceCommonSymbols() {
     bss->markDead();
     inputSections.push_back(bss);
     s->replace(Defined{s->file, s->getName(), s->binding, s->stOther, s->type,
-                       /*Value=*/0, s->size, bss});
+                       /*value=*/0, s->size, bss});
   });
 }
 
@@ -1406,8 +1416,8 @@ static void demoteSharedSymbols() {
   });
 }
 
-// The section referred to by S is considered address-significant. Set the
-// KeepUnique flag on the section if appropriate.
+// The section referred to by `s` is considered address-significant. Set the
+// keepUnique flag on the section if appropriate.
 static void markAddrsig(Symbol *s) {
   if (auto *d = dyn_cast_or_null<Defined>(s))
     if (d->section)
@@ -1540,7 +1550,7 @@ template <class ELFT> void LinkerDriver::compileBitcodeFiles() {
 
   for (InputFile *file : lto->compile()) {
     auto *obj = cast<ObjFile<ELFT>>(file);
-    obj->parse(/*IgnoreComdats=*/true);
+    obj->parse(/*ignoreComdats=*/true);
     for (Symbol *sym : obj->getGlobalSymbols())
       sym->parseSymbolVersion();
     objectFiles.push_back(file);
@@ -1579,8 +1589,8 @@ static std::vector<WrappedSymbol> addWrappedSymbols(opt::InputArgList &args) {
     if (!sym)
       continue;
 
-    Symbol *real = addUndefined(Saver.save("__real_" + name));
-    Symbol *wrap = addUndefined(Saver.save("__wrap_" + name));
+    Symbol *real = addUndefined(saver.save("__real_" + name));
+    Symbol *wrap = addUndefined(saver.save("__wrap_" + name));
     v.push_back({sym, real, wrap});
 
     // We want to tell LTO not to inline symbols to be overwritten
@@ -1772,7 +1782,7 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
   if (args.hasArg(OPT_exclude_libs))
     excludeLibs(args);
 
-  // Create ElfHeader early. We need a dummy section in
+  // Create elfHeader early. We need a dummy section in
   // addReservedSymbols to mark the created symbols as not absolute.
   Out::elfHeader = make<OutputSection>("", 0, SHF_ALLOC);
   Out::elfHeader->size = sizeof(typename ELFT::Ehdr);
@@ -1854,14 +1864,14 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
   target = getTarget();
 
   config->eflags = target->calcEFlags();
-  // MaxPageSize (sometimes called abi page size) is the maximum page size that
+  // maxPageSize (sometimes called abi page size) is the maximum page size that
   // the output can be run on. For example if the OS can use 4k or 64k page
-  // sizes then MaxPageSize must be 64 for the output to be useable on both.
+  // sizes then maxPageSize must be 64k for the output to be useable on both.
   // All important alignment decisions must use this value.
   config->maxPageSize = getMaxPageSize(args);
-  // CommonPageSize is the most common page size that the output will be run on.
+  // commonPageSize is the most common page size that the output will be run on.
   // For example if an OS can use 4k or 64k page sizes and 4k is more common
-  // than 64k then CommonPageSize is set to 4k. CommonPageSize can be used for
+  // than 64k then commonPageSize is set to 4k. commonPageSize can be used for
   // optimizations such as DATA_SEGMENT_ALIGN in linker scripts. LLD's use of it
   // is limited to writing trap instructions on the last executable segment.
   config->commonPageSize = getCommonPageSize(args);
@@ -1891,6 +1901,26 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
   markLive<ELFT>();
   demoteSharedSymbols();
   mergeSections();
+
+  // Make copies of any input sections that need to be copied into each
+  // partition.
+  copySectionsIntoPartitions();
+
+  // Create synthesized sections such as .got and .plt. This is called before
+  // processSectionCommands() so that they can be placed by SECTIONS commands.
+  createSyntheticSections<ELFT>();
+
+  // Some input sections that are used for exception handling need to be moved
+  // into synthetic sections. Do that now so that they aren't assigned to
+  // output sections in the usual way.
+  if (!config->relocatable)
+    combineEhSections();
+
+  // Create output sections described by SECTIONS commands.
+  script->processSectionCommands();
+
+  // Two input sections with different output sections should not be folded.
+  // ICF runs after processSectionCommands() so that we know the output sections.
   if (config->icf != ICFLevel::None) {
     findKeepUniqueSections<ELFT>(args);
     doIcf<ELFT>();

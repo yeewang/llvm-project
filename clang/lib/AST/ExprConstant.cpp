@@ -36,9 +36,9 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/ASTDiagnostic.h"
 #include "clang/AST/ASTLambda.h"
+#include "clang/AST/CXXInheritance.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/CurrentSourceLocExprScope.h"
-#include "clang/AST/CXXInheritance.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/OSLog.h"
 #include "clang/AST/RecordLayout.h"
@@ -9008,6 +9008,9 @@ EvaluateBuiltinClassifyType(QualType T, const LangOptions &LangOpts) {
     case BuiltinType::OCLClkEvent:
     case BuiltinType::OCLQueue:
     case BuiltinType::OCLReserveID:
+#define SVE_TYPE(Name, Id, SingletonId) \
+    case BuiltinType::Id:
+#include "clang/Basic/AArch64SVEACLETypes.def"
       return GCCTypeClass::None;
 
     case BuiltinType::Dependent:

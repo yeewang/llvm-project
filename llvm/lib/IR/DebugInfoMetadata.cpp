@@ -828,9 +828,15 @@ DIExpression *DIExpression::getImpl(LLVMContext &Context,
 }
 
 unsigned DIExpression::ExprOperand::getSize() const {
-  switch (getOp()) {
+  uint64_t Op = getOp();
+
+  if (Op >= dwarf::DW_OP_breg0 && Op <= dwarf::DW_OP_breg31)
+    return 2;
+
+  switch (Op) {
   case dwarf::DW_OP_LLVM_convert:
   case dwarf::DW_OP_LLVM_fragment:
+  case dwarf::DW_OP_bregx:
     return 3;
   case dwarf::DW_OP_constu:
   case dwarf::DW_OP_consts:
@@ -852,8 +858,9 @@ bool DIExpression::isValid() const {
       return false;
 
     uint64_t Op = I->getOp();
-    if (Op >= dwarf::DW_OP_reg0 && Op <= dwarf::DW_OP_reg31)
-      continue;
+    if ((Op >= dwarf::DW_OP_reg0 && Op <= dwarf::DW_OP_reg31) ||
+        (Op >= dwarf::DW_OP_breg0 && Op <= dwarf::DW_OP_breg31))
+      return true;
 
     // Check that the operand is valid.
     switch (Op) {
@@ -912,6 +919,7 @@ bool DIExpression::isValid() const {
     case dwarf::DW_OP_not:
     case dwarf::DW_OP_dup:
     case dwarf::DW_OP_regx:
+    case dwarf::DW_OP_bregx:
       break;
     }
   }

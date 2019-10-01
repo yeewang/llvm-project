@@ -76,6 +76,26 @@ AArch64::AArch64() {
 RelExpr AArch64::getRelExpr(RelType type, const Symbol &s,
                             const uint8_t *loc) const {
   switch (type) {
+  case R_AARCH64_ABS16:
+  case R_AARCH64_ABS32:
+  case R_AARCH64_ABS64:
+  case R_AARCH64_ADD_ABS_LO12_NC:
+  case R_AARCH64_LDST128_ABS_LO12_NC:
+  case R_AARCH64_LDST16_ABS_LO12_NC:
+  case R_AARCH64_LDST32_ABS_LO12_NC:
+  case R_AARCH64_LDST64_ABS_LO12_NC:
+  case R_AARCH64_LDST8_ABS_LO12_NC:
+  case R_AARCH64_MOVW_SABS_G0:
+  case R_AARCH64_MOVW_SABS_G1:
+  case R_AARCH64_MOVW_SABS_G2:
+  case R_AARCH64_MOVW_UABS_G0:
+  case R_AARCH64_MOVW_UABS_G0_NC:
+  case R_AARCH64_MOVW_UABS_G1:
+  case R_AARCH64_MOVW_UABS_G1_NC:
+  case R_AARCH64_MOVW_UABS_G2:
+  case R_AARCH64_MOVW_UABS_G2_NC:
+  case R_AARCH64_MOVW_UABS_G3:
+    return R_ABS;
   case R_AARCH64_TLSDESC_ADR_PAGE21:
     return R_AARCH64_TLSDESC_PAGE;
   case R_AARCH64_TLSDESC_LD64_LO12:
@@ -90,6 +110,11 @@ RelExpr AArch64::getRelExpr(RelType type, const Symbol &s,
   case R_AARCH64_TLSLE_LDST32_TPREL_LO12_NC:
   case R_AARCH64_TLSLE_LDST64_TPREL_LO12_NC:
   case R_AARCH64_TLSLE_LDST128_TPREL_LO12_NC:
+  case R_AARCH64_TLSLE_MOVW_TPREL_G0:
+  case R_AARCH64_TLSLE_MOVW_TPREL_G0_NC:
+  case R_AARCH64_TLSLE_MOVW_TPREL_G1:
+  case R_AARCH64_TLSLE_MOVW_TPREL_G1_NC:
+  case R_AARCH64_TLSLE_MOVW_TPREL_G2:
     return R_TLS;
   case R_AARCH64_CALL26:
   case R_AARCH64_CONDBR19:
@@ -101,8 +126,16 @@ RelExpr AArch64::getRelExpr(RelType type, const Symbol &s,
   case R_AARCH64_PREL64:
   case R_AARCH64_ADR_PREL_LO21:
   case R_AARCH64_LD_PREL_LO19:
+  case R_AARCH64_MOVW_PREL_G0:
+  case R_AARCH64_MOVW_PREL_G0_NC:
+  case R_AARCH64_MOVW_PREL_G1:
+  case R_AARCH64_MOVW_PREL_G1_NC:
+  case R_AARCH64_MOVW_PREL_G2:
+  case R_AARCH64_MOVW_PREL_G2_NC:
+  case R_AARCH64_MOVW_PREL_G3:
     return R_PC;
   case R_AARCH64_ADR_PREL_PG_HI21:
+  case R_AARCH64_ADR_PREL_PG_HI21_NC:
     return R_AARCH64_PAGE_PC;
   case R_AARCH64_LD64_GOT_LO12_NC:
   case R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC:
@@ -113,7 +146,9 @@ RelExpr AArch64::getRelExpr(RelType type, const Symbol &s,
   case R_AARCH64_NONE:
     return R_NONE;
   default:
-    return R_ABS;
+    error(getErrorLocation(loc) + "unknown relocation (" + Twine(type) +
+          ") against symbol " + toString(s));
+    return R_NONE;
   }
 }
 
@@ -246,6 +281,26 @@ static void or32AArch64Imm(uint8_t *l, uint64_t imm) {
   or32le(l, (imm & 0xFFF) << 10);
 }
 
+// Update the immediate field in an AArch64 movk, movn or movz instruction
+// for a signed relocation, and update the opcode of a movn or movz instruction
+// to match the sign of the operand.
+static void writeSMovWImm(uint8_t *loc, uint32_t imm) {
+  uint32_t inst = read32le(loc);
+  // Opcode field is bits 30, 29, with 10 = movz, 00 = movn and 11 = movk.
+  if (!(inst & (1 << 29))) {
+    // movn or movz.
+    if (imm & 0x10000) {
+      // Change opcode to movn, which takes an inverted operand.
+      imm ^= 0xFFFF;
+      inst &= ~(1 << 30);
+    } else {
+      // Change opcode to movz.
+      inst |= 1 << 30;
+    }
+  }
+  write32le(loc, inst | ((imm & 0xFFFF) << 5));
+}
+
 void AArch64::relocateOne(uint8_t *loc, RelType type, uint64_t val) const {
   switch (type) {
   case R_AARCH64_ABS16:
@@ -270,6 +325,8 @@ void AArch64::relocateOne(uint8_t *loc, RelType type, uint64_t val) const {
   case R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21:
   case R_AARCH64_TLSDESC_ADR_PAGE21:
     checkInt(loc, val, 33, type);
+    LLVM_FALLTHROUGH;
+  case R_AARCH64_ADR_PREL_PG_HI21_NC:
     write32AArch64Addr(loc, val >> 12);
     break;
   case R_AARCH64_ADR_PREL_LO21:
@@ -323,17 +380,55 @@ void AArch64::relocateOne(uint8_t *loc, RelType type, uint64_t val) const {
     checkAlignment(loc, val, 16, type);
     or32AArch64Imm(loc, getBits(val, 4, 11));
     break;
+  case R_AARCH64_MOVW_UABS_G0:
+    checkUInt(loc, val, 16, type);
+    LLVM_FALLTHROUGH;
   case R_AARCH64_MOVW_UABS_G0_NC:
     or32le(loc, (val & 0xFFFF) << 5);
     break;
+  case R_AARCH64_MOVW_UABS_G1:
+    checkUInt(loc, val, 32, type);
+    LLVM_FALLTHROUGH;
   case R_AARCH64_MOVW_UABS_G1_NC:
     or32le(loc, (val & 0xFFFF0000) >> 11);
     break;
+  case R_AARCH64_MOVW_UABS_G2:
+    checkUInt(loc, val, 48, type);
+    LLVM_FALLTHROUGH;
   case R_AARCH64_MOVW_UABS_G2_NC:
     or32le(loc, (val & 0xFFFF00000000) >> 27);
     break;
   case R_AARCH64_MOVW_UABS_G3:
     or32le(loc, (val & 0xFFFF000000000000) >> 43);
+    break;
+  case R_AARCH64_MOVW_PREL_G0:
+  case R_AARCH64_MOVW_SABS_G0:
+  case R_AARCH64_TLSLE_MOVW_TPREL_G0:
+    checkInt(loc, val, 17, type);
+    LLVM_FALLTHROUGH;
+  case R_AARCH64_MOVW_PREL_G0_NC:
+  case R_AARCH64_TLSLE_MOVW_TPREL_G0_NC:
+    writeSMovWImm(loc, val);
+    break;
+  case R_AARCH64_MOVW_PREL_G1:
+  case R_AARCH64_MOVW_SABS_G1:
+  case R_AARCH64_TLSLE_MOVW_TPREL_G1:
+    checkInt(loc, val, 33, type);
+    LLVM_FALLTHROUGH;
+  case R_AARCH64_MOVW_PREL_G1_NC:
+  case R_AARCH64_TLSLE_MOVW_TPREL_G1_NC:
+    writeSMovWImm(loc, val >> 16);
+    break;
+  case R_AARCH64_MOVW_PREL_G2:
+  case R_AARCH64_MOVW_SABS_G2:
+  case R_AARCH64_TLSLE_MOVW_TPREL_G2:
+    checkInt(loc, val, 49, type);
+    LLVM_FALLTHROUGH;
+  case R_AARCH64_MOVW_PREL_G2_NC:
+    writeSMovWImm(loc, val >> 32);
+    break;
+  case R_AARCH64_MOVW_PREL_G3:
+    writeSMovWImm(loc, val >> 48);
     break;
   case R_AARCH64_TSTBR14:
     checkInt(loc, val, 16, type);
@@ -348,7 +443,7 @@ void AArch64::relocateOne(uint8_t *loc, RelType type, uint64_t val) const {
     or32AArch64Imm(loc, val);
     break;
   default:
-    error(getErrorLocation(loc) + "unrecognized relocation " + toString(type));
+    llvm_unreachable("unknown relocation");
   }
 }
 
@@ -514,7 +609,7 @@ void AArch64BtiPac::writePltHeader(uint8_t *buf) const {
   uint64_t plt = in.plt->getVA();
 
   if (btiHeader) {
-    // PltHeader is called indirectly by Plt[N]. Prefix PltData with a BTI C
+    // PltHeader is called indirectly by plt[N]. Prefix pltData with a BTI C
     // instruction.
     memcpy(buf, btiData, sizeof(btiData));
     buf += sizeof(btiData);
@@ -535,7 +630,7 @@ void AArch64BtiPac::writePlt(uint8_t *buf, uint64_t gotPltEntryAddr,
                              uint64_t pltEntryAddr, int32_t index,
                              unsigned relOff) const {
   // The PLT entry is of the form:
-  // [BtiData] AddrInst (PacBr | StdBr) [NopData]
+  // [btiData] addrInst (pacBr | stdBr) [nopData]
   const uint8_t btiData[] = { 0x5f, 0x24, 0x03, 0xd5 }; // bti c
   const uint8_t addrInst[] = {
       0x10, 0x00, 0x00, 0x90,  // adrp x16, Page(&(.plt.got[n]))

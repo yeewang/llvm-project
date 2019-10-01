@@ -1,5 +1,5 @@
 ; RUN: opt -functionattrs -S < %s | FileCheck %s --check-prefix=FNATTR
-; RUN: opt -attributor -attributor-disable=false -S < %s | FileCheck %s --check-prefix=ATTRIBUTOR
+; RUN: opt -attributor -attributor-disable=false -attributor-max-iterations-verify -attributor-max-iterations=9 -S < %s | FileCheck %s --check-prefix=ATTRIBUTOR
 ; RUN: opt -attributor -attributor-disable=false -functionattrs -S < %s | FileCheck %s --check-prefix=BOTH
 ;
 ; Test cases specifically designed for the "returned" argument attribute.
@@ -8,13 +8,13 @@
 
 ; TEST SCC test returning an integer value argument
 ;
-; BOTH: Function Attrs: noinline norecurse nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline norecurse nosync nounwind readnone uwtable
 ; BOTH-NEXT: define i32 @sink_r0(i32 returned %r)
-; BOTH: Function Attrs: noinline nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline nosync nounwind readnone uwtable
 ; BOTH-NEXT: define i32 @scc_r1(i32 %a, i32 returned %r, i32 %b)
-; BOTH: Function Attrs: noinline nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline nosync nounwind readnone uwtable
 ; BOTH-NEXT: define i32 @scc_r2(i32 %a, i32 %b, i32 returned %r)
-; BOTH: Function Attrs: noinline nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline nosync nounwind readnone uwtable
 ; BOTH-NEXT: define i32 @scc_rX(i32 %a, i32 %b, i32 %r)
 ;
 ; FNATTR: define i32 @sink_r0(i32 returned %r)
@@ -159,20 +159,23 @@ return:                                           ; preds = %cond.end, %if.then3
 
 ; TEST SCC test returning a pointer value argument
 ;
-; BOTH: Function Attrs: noinline norecurse nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline norecurse nosync nounwind readnone uwtable
 ; BOTH-NEXT: define double* @ptr_sink_r0(double* readnone returned %r)
-; BOTH: Function Attrs: noinline nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline nosync nounwind readnone uwtable
 ; BOTH-NEXT: define double* @ptr_scc_r1(double* %a, double* readnone returned %r, double* nocapture readnone %b)
-; BOTH: Function Attrs: noinline nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline nosync nounwind readnone uwtable
 ; BOTH-NEXT: define double* @ptr_scc_r2(double* readnone %a, double* readnone %b, double* readnone returned %r)
 ;
 ; FNATTR: define double* @ptr_sink_r0(double* readnone returned %r)
 ; FNATTR: define double* @ptr_scc_r1(double* %a, double* readnone %r, double* nocapture readnone %b)
 ; FNATTR: define double* @ptr_scc_r2(double* readnone %a, double* readnone %b, double* readnone %r)
 ;
-; ATTRIBUTOR: define double* @ptr_sink_r0(double* returned %r)
-; ATTRIBUTOR: define double* @ptr_scc_r1(double* %a, double* returned %r, double* %b)
-; ATTRIBUTOR: define double* @ptr_scc_r2(double* %a, double* %b, double* returned %r)
+; ATTRIBUTOR: Function Attrs: nofree noinline nosync nounwind uwtable
+; ATTRIBUTOR-NEXT: define double* @ptr_sink_r0(double* returned %r)
+; ATTRIBUTOR: Function Attrs: nofree noinline nosync nounwind uwtable
+; ATTRIBUTOR-NEXT: define double* @ptr_scc_r1(double* %a, double* returned %r, double* %b)
+; ATTRIBUTOR: Function Attrs: nofree noinline nosync nounwind uwtable
+; ATTRIBUTOR-NEXT: define double* @ptr_scc_r2(double* %a, double* %b, double* returned %r)
 ;
 ; double* ptr_scc_r1(double* a, double* b, double* r);
 ; double* ptr_scc_r2(double* a, double* b, double* r);
@@ -256,10 +259,9 @@ return:                                           ; preds = %cond.end, %if.then3
 ;   return *a ? a : rt0(a);
 ; }
 ;
-; FIXME: no-return missing
 ; FNATTR:  define i32* @rt0(i32* readonly %a)
-; BOTH: Function Attrs: noinline nounwind readonly uwtable
-; BOTH-NEXT:    define i32* @rt0(i32* readonly returned %a)
+; BOTH: Function Attrs: nofree noinline noreturn nosync nounwind readonly uwtable
+; BOTH-NEXT:    define noalias nonnull align 536870912 dereferenceable(4294967295) i32* @rt0(i32* readonly %a)
 define i32* @rt0(i32* %a) #0 {
 entry:
   %v = load i32, i32* %a, align 4
@@ -275,10 +277,9 @@ entry:
 ;   return *a ? undef : rt1(a);
 ; }
 ;
-; FIXME: no-return missing
 ; FNATTR:  define noalias i32* @rt1(i32* nocapture readonly %a)
-; BOTH: Function Attrs: noinline nounwind readonly uwtable
-; BOTH-NEXT:    define noalias i32* @rt1(i32* nocapture readonly %a)
+; BOTH: Function Attrs: nofree noinline noreturn nosync nounwind readonly uwtable
+; BOTH-NEXT:    define noalias nonnull align 536870912 dereferenceable(4294967295) i32* @rt1(i32* nocapture readonly %a)
 define i32* @rt1(i32* %a) #0 {
 entry:
   %v = load i32, i32* %a, align 4
@@ -292,7 +293,7 @@ entry:
 ;
 ; FNATTR:  define i32* @rt2_helper(i32* %a)
 ; FNATTR:  define i32* @rt2(i32* readnone %a, i32* readnone %b)
-; BOTH:    define i32* @rt2_helper(i32* %a)
+; BOTH:    define i32* @rt2_helper(i32* returned %a)
 ; BOTH:    define i32* @rt2(i32* readnone %a, i32* readnone %b)
 define i32* @rt2_helper(i32* %a) #0 {
 entry:
@@ -438,11 +439,12 @@ entry:
 ;   return b == 0? b : x;
 ; }
 ;
-; BOTH: Function Attrs: noinline norecurse nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline norecurse nosync nounwind readnone uwtable
 ; BOTH-NEXT: define double @select_and_phi(double returned %b)
 ;
 ; FNATTR:     define double @select_and_phi(double %b)
-; ATTRIBUTOR: define double @select_and_phi(double returned %b)
+; ATTRIBUTOR: Function Attrs: nofree noinline nosync nounwind uwtable
+; ATTRIBUTOR-NEXT: define double @select_and_phi(double returned %b)
 define double @select_and_phi(double %b) #0 {
 entry:
   %cmp = fcmp ogt double %b, 0.000000e+00
@@ -468,11 +470,13 @@ if.end:                                           ; preds = %if.then, %entry
 ;   return b == 0? b : x;
 ; }
 ;
-; BOTH: Function Attrs: noinline nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline nosync nounwind readnone uwtable
 ; BOTH-NEXT: define double @recursion_select_and_phi(i32 %a, double returned %b)
 ;
 ; FNATTR:     define double @recursion_select_and_phi(i32 %a, double %b)
-; ATTRIBUTOR: define double @recursion_select_and_phi(i32 %a, double returned %b)
+;
+; ATTRIBUTOR: Function Attrs: nofree noinline nosync nounwind uwtable
+; ATTRIBUTOR-NEXT: define double @recursion_select_and_phi(i32 %a, double returned %b)
 define double @recursion_select_and_phi(i32 %a, double %b) #0 {
 entry:
   %dec = add nsw i32 %a, -1
@@ -497,11 +501,13 @@ if.end:                                           ; preds = %if.then, %entry
 ;   return (double*)b;
 ; }
 ;
-; BOTH: Function Attrs: noinline norecurse nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline norecurse nosync nounwind readnone uwtable
 ; BOTH-NEXT:  define double* @bitcast(i32* readnone returned %b)
 ;
 ; FNATTR:     define double* @bitcast(i32* readnone %b)
-; ATTRIBUTOR: define double* @bitcast(i32* returned %b)
+;
+; ATTRIBUTOR: Function Attrs: nofree noinline nosync nounwind uwtable
+; ATTRIBUTOR-NEXT: define double* @bitcast(i32* returned %b)
 define double* @bitcast(i32* %b) #0 {
 entry:
   %bc0 = bitcast i32* %b to double*
@@ -518,11 +524,13 @@ entry:
 ;   return b != 0 ? b : x;
 ; }
 ;
-; BOTH: Function Attrs: noinline norecurse nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline norecurse nosync nounwind readnone uwtable
 ; BOTH-NEXT: define double* @bitcasts_select_and_phi(i32* readnone returned %b)
 ;
 ; FNATTR:     define double* @bitcasts_select_and_phi(i32* readnone %b)
-; ATTRIBUTOR: define double* @bitcasts_select_and_phi(i32* returned %b)
+;
+; ATTRIBUTOR: Function Attrs: nofree noinline nosync nounwind uwtable
+; ATTRIBUTOR-NEXT: define double* @bitcasts_select_and_phi(i32* returned %b)
 define double* @bitcasts_select_and_phi(i32* %b) #0 {
 entry:
   %bc0 = bitcast i32* %b to double*
@@ -554,11 +562,13 @@ if.end:                                           ; preds = %if.then, %entry
 ;   /* return undef */
 ; }
 ;
-; BOTH: Function Attrs: noinline norecurse nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline norecurse nosync nounwind readnone uwtable
 ; BOTH-NEXT:  define double* @ret_arg_arg_undef(i32* readnone returned %b)
 ;
 ; FNATTR:     define double* @ret_arg_arg_undef(i32* readnone %b)
-; ATTRIBUTOR: define double* @ret_arg_arg_undef(i32* returned %b)
+;
+; ATTRIBUTOR: Function Attrs: nofree noinline nosync nounwind uwtable
+; ATTRIBUTOR-NEXT: define double* @ret_arg_arg_undef(i32* returned %b)
 define double* @ret_arg_arg_undef(i32* %b) #0 {
 entry:
   %bc0 = bitcast i32* %b to double*
@@ -590,11 +600,13 @@ ret_undef:
 ;   /* return undef */
 ; }
 ;
-; BOTH: Function Attrs: noinline norecurse nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline norecurse nosync nounwind readnone uwtable
 ; BOTH-NEXT:  define double* @ret_undef_arg_arg(i32* readnone returned %b)
 ;
 ; FNATTR:     define double* @ret_undef_arg_arg(i32* readnone %b)
-; ATTRIBUTOR: define double* @ret_undef_arg_arg(i32* returned %b)
+;
+; ATTRIBUTOR: Function Attrs: nofree noinline nosync nounwind uwtable
+; ATTRIBUTOR-NEXT: define double* @ret_undef_arg_arg(i32* returned %b)
 define double* @ret_undef_arg_arg(i32* %b) #0 {
 entry:
   %bc0 = bitcast i32* %b to double*
@@ -626,7 +638,7 @@ ret_arg1:
 ;   /* return undef */
 ; }
 ;
-; BOTH: Function Attrs: noinline norecurse nounwind readnone uwtable
+; BOTH: Function Attrs: nofree noinline norecurse nosync nounwind readnone uwtable
 ; BOTH-NEXT:  define double* @ret_undef_arg_undef(i32* readnone returned %b)
 ;
 ; FNATTR:     define double* @ret_undef_arg_undef(i32* readnone %b)
@@ -702,10 +714,16 @@ r:
 ;
 ; FNATTR:     define i32 @deadblockcall1(i32 %A)
 ; FNATTR:     define i32 @deadblockcall2(i32 %A)
+; FNATTR:     define i32 @deadblockphi1(i32 %A)
+; FNATTR:     define i32 @deadblockphi2(i32 %A)
 ; ATTRIBUTOR: define i32 @deadblockcall1(i32 returned %A)
 ; ATTRIBUTOR: define i32 @deadblockcall2(i32 returned %A)
+; ATTRIBUTOR: define i32 @deadblockphi1(i32 returned %A)
+; ATTRIBUTOR: define i32 @deadblockphi2(i32 returned %A)
 ; BOTH:       define i32 @deadblockcall1(i32 returned %A)
 ; BOTH:       define i32 @deadblockcall2(i32 returned %A)
+; BOTH:       define i32 @deadblockphi1(i32 returned %A)
+; BOTH:       define i32 @deadblockphi2(i32 returned %A)
 define i32 @deadblockcall1(i32 %A) #0 {
 entry:
   ret i32 %A
@@ -727,11 +745,69 @@ unreachableblock2:
   ret i32 %C
 }
 
+define i32 @deadblockphi1(i32 %A) #0 {
+entry:
+  br label %r
+unreachableblock1:
+  %B = call i32 @deadblockcall_helper(i32 %B)
+  ret i32 %B
+unreachableblock2:
+  %C = call i32 @deadblockcall1(i32 %C)
+  br label %r
+r:
+  %PHI = phi i32 [%A, %entry], [%C, %unreachableblock2]
+  ret i32 %PHI
+}
+
+define i32 @deadblockphi2(i32 %A) #0 {
+entry:
+  br label %r
+unreachableblock1:
+  %B = call i32 @deadblockcall_helper(i32 %B)
+  br label %unreachableblock3
+unreachableblock2:
+  %C = call i32 @deadblockcall1(i32 %C)
+  br label %unreachableblock3
+unreachableblock3:
+  %PHI1 = phi i32 [%B, %unreachableblock1], [%C, %unreachableblock2]
+  br label %r
+r:
+  %PHI2 = phi i32 [%A, %entry], [%PHI1, %unreachableblock3]
+  ret i32 %PHI2
+}
+
+declare void @noreturn() noreturn;
+
+define i32 @deadblockphi3(i32 %A, i1 %c) #0 {
+entry:
+  br i1 %c, label %r, label %unreachablecall
+unreachablecall:
+  call void @noreturn();
+  %B = call i32 @deadblockcall_helper(i32 0)
+  br label %unreachableblock3
+unreachableblock2:
+  %C = call i32 @deadblockcall1(i32 %C)
+  br label %unreachableblock3
+unreachableblock3:
+  %PHI1 = phi i32 [%B, %unreachablecall], [%C, %unreachableblock2]
+  br label %r
+r:
+  %PHI2 = phi i32 [%A, %entry], [%PHI1, %unreachableblock3]
+  ret i32 %PHI2
+}
+
+
 attributes #0 = { noinline nounwind uwtable }
 
 ; BOTH-NOT: attributes #
-; BOTH-DAG: attributes #{{[0-9]*}} = { noinline norecurse nounwind readnone uwtable }
-; BOTH-DAG: attributes #{{[0-9]*}} = { noinline nounwind readnone uwtable }
-; BOTH-DAG: attributes #{{[0-9]*}} = { noinline nounwind readonly uwtable }
+; BOTH-DAG: attributes #{{[0-9]*}} = { nofree noinline norecurse nosync nounwind readnone uwtable willreturn }
+; BOTH-DAG: attributes #{{[0-9]*}} = { nofree noinline nosync nounwind readnone uwtable }
+; BOTH-DAG: attributes #{{[0-9]*}} = { nofree noinline noreturn nosync nounwind readonly uwtable }
 ; BOTH-DAG: attributes #{{[0-9]*}} = { noinline nounwind uwtable }
+; BOTH-DAG: attributes #{{[0-9]*}} = { nofree noinline nosync nounwind readnone uwtable willreturn }
+; BOTH-DAG: attributes #{{[0-9]*}} = { nofree noinline nosync nounwind uwtable willreturn }
+; BOTH-DAG: attributes #{{[0-9]*}} = { nofree nosync willreturn }
+; BOTH-DAG: attributes #{{[0-9]*}} = { nofree nosync }
+; BOTH-DAG: attributes #{{[0-9]*}} = { nofree noreturn nosync }
+; BOTH-DAG: attributes #{{[0-9]*}} = { noreturn }
 ; BOTH-NOT: attributes #

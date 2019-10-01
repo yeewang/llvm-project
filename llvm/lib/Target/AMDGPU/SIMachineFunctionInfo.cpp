@@ -53,8 +53,7 @@ SIMachineFunctionInfo::SIMachineFunctionInfo(const MachineFunction &MF)
   FlatWorkGroupSizes = ST.getFlatWorkGroupSizes(F);
   WavesPerEU = ST.getWavesPerEU(F);
 
-  Occupancy = getMaxWavesPerEU();
-  limitOccupancy(MF);
+  Occupancy = ST.computeOccupancy(MF, getLDSSize());
   CallingConv::ID CC = F.getCallingConv();
 
   if (CC == CallingConv::AMDGPU_KERNEL || CC == CallingConv::SPIR_KERNEL) {
@@ -319,7 +318,75 @@ bool SIMachineFunctionInfo::allocateSGPRSpillToVGPR(MachineFunction &MF,
   return true;
 }
 
-void SIMachineFunctionInfo::removeSGPRToVGPRFrameIndices(MachineFrameInfo &MFI) {
+/// Reserve AGPRs or VGPRs to support spilling for FrameIndex \p FI.
+/// Either AGPR is spilled to VGPR to vice versa.
+/// Returns true if a \p FI can be eliminated completely.
+bool SIMachineFunctionInfo::allocateVGPRSpillToAGPR(MachineFunction &MF,
+                                                    int FI,
+                                                    bool isAGPRtoVGPR) {
+  MachineRegisterInfo &MRI = MF.getRegInfo();
+  MachineFrameInfo &FrameInfo = MF.getFrameInfo();
+  const GCNSubtarget &ST =  MF.getSubtarget<GCNSubtarget>();
+
+  assert(ST.hasMAIInsts() && FrameInfo.isSpillSlotObjectIndex(FI));
+
+  auto &Spill = VGPRToAGPRSpills[FI];
+
+  // This has already been allocated.
+  if (!Spill.Lanes.empty())
+    return Spill.FullyAllocated;
+
+  unsigned Size = FrameInfo.getObjectSize(FI);
+  unsigned NumLanes = Size / 4;
+  Spill.Lanes.resize(NumLanes, AMDGPU::NoRegister);
+
+  const TargetRegisterClass &RC =
+      isAGPRtoVGPR ? AMDGPU::VGPR_32RegClass : AMDGPU::AGPR_32RegClass;
+  auto Regs = RC.getRegisters();
+
+  auto &SpillRegs = isAGPRtoVGPR ? SpillAGPR : SpillVGPR;
+  const SIRegisterInfo *TRI = ST.getRegisterInfo();
+  Spill.FullyAllocated = true;
+
+  // FIXME: Move allocation logic out of MachineFunctionInfo and initialize
+  // once.
+  BitVector OtherUsedRegs;
+  OtherUsedRegs.resize(TRI->getNumRegs());
+
+  const uint32_t *CSRMask =
+      TRI->getCallPreservedMask(MF, MF.getFunction().getCallingConv());
+  if (CSRMask)
+    OtherUsedRegs.setBitsInMask(CSRMask);
+
+  // TODO: Should include register tuples, but doesn't matter with current
+  // usage.
+  for (MCPhysReg Reg : SpillAGPR)
+    OtherUsedRegs.set(Reg);
+  for (MCPhysReg Reg : SpillVGPR)
+    OtherUsedRegs.set(Reg);
+
+  SmallVectorImpl<MCPhysReg>::const_iterator NextSpillReg = Regs.begin();
+  for (unsigned I = 0; I < NumLanes; ++I) {
+    NextSpillReg = std::find_if(
+        NextSpillReg, Regs.end(), [&MRI, &OtherUsedRegs](MCPhysReg Reg) {
+          return MRI.isAllocatable(Reg) && !MRI.isPhysRegUsed(Reg) &&
+                 !OtherUsedRegs[Reg];
+        });
+
+    if (NextSpillReg == Regs.end()) { // Registers exhausted
+      Spill.FullyAllocated = false;
+      break;
+    }
+
+    OtherUsedRegs.set(*NextSpillReg);
+    SpillRegs.push_back(*NextSpillReg);
+    Spill.Lanes[I] = *NextSpillReg++;
+  }
+
+  return Spill.FullyAllocated;
+}
+
+void SIMachineFunctionInfo::removeDeadFrameIndices(MachineFrameInfo &MFI) {
   // The FP spill hasn't been inserted yet, so keep it around.
   for (auto &R : SGPRToVGPRSpills) {
     if (R.first != FramePointerSaveIndex)
@@ -332,6 +399,11 @@ void SIMachineFunctionInfo::removeSGPRToVGPRFrameIndices(MachineFrameInfo &MFI) 
        ++i)
     if (i != FramePointerSaveIndex)
       MFI.setStackID(i, TargetStackID::Default);
+
+  for (auto &R : VGPRToAGPRSpills) {
+    if (R.second.FullyAllocated)
+      MFI.RemoveStackObject(R.first);
+  }
 }
 
 MCPhysReg SIMachineFunctionInfo::getNextUserSGPR() const {
@@ -414,11 +486,13 @@ yaml::SIMachineFunctionInfo::SIMachineFunctionInfo(
     NoSignedZerosFPMath(MFI.hasNoSignedZerosFPMath()),
     MemoryBound(MFI.isMemoryBound()),
     WaveLimiter(MFI.needsWaveLimiter()),
+    HighBitsOf32BitAddress(MFI.get32BitAddressHighBits()),
     ScratchRSrcReg(regToString(MFI.getScratchRSrcReg(), TRI)),
     ScratchWaveOffsetReg(regToString(MFI.getScratchWaveOffsetReg(), TRI)),
     FrameOffsetReg(regToString(MFI.getFrameOffsetReg(), TRI)),
     StackPtrOffsetReg(regToString(MFI.getStackPtrOffsetReg(), TRI)),
-    ArgInfo(convertArgumentInfo(MFI.getArgInfo(), TRI)) {}
+    ArgInfo(convertArgumentInfo(MFI.getArgInfo(), TRI)),
+    Mode(MFI.getMode()) {}
 
 void yaml::SIMachineFunctionInfo::mappingImpl(yaml::IO &YamlIO) {
   MappingTraits<SIMachineFunctionInfo>::mapping(YamlIO, *this);
@@ -429,6 +503,7 @@ bool SIMachineFunctionInfo::initializeBaseYamlFields(
   ExplicitKernArgSize = YamlMFI.ExplicitKernArgSize;
   MaxKernArgAlign = YamlMFI.MaxKernArgAlign;
   LDSSize = YamlMFI.LDSSize;
+  HighBitsOf32BitAddress = YamlMFI.HighBitsOf32BitAddress;
   IsEntryFunction = YamlMFI.IsEntryFunction;
   NoSignedZerosFPMath = YamlMFI.NoSignedZerosFPMath;
   MemoryBound = YamlMFI.MemoryBound;

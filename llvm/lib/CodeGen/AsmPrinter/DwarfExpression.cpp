@@ -15,6 +15,7 @@
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/BinaryFormat/Dwarf.h"
+#include "llvm/CodeGen/Register.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -97,7 +98,7 @@ void DwarfExpression::addAnd(unsigned Mask) {
 
 bool DwarfExpression::addMachineReg(const TargetRegisterInfo &TRI,
                                     unsigned MachineReg, unsigned MaxSize) {
-  if (!TRI.isPhysicalRegister(MachineReg)) {
+  if (!llvm::Register::isPhysicalRegister(MachineReg)) {
     if (isFrameRegister(TRI, MachineReg)) {
       DwarfRegs.push_back({-1, 0, nullptr});
       return true;
@@ -241,13 +242,12 @@ bool DwarfExpression::addMachineRegExpression(const TargetRegisterInfo &TRI,
     return false;
   }
 
-  // Handle simple register locations. If we are supposed to
-  // emit a call site parameter expression and if that expression
-  // is just a register location, emit it with addBReg and offset 0,
-  // because we should emit a DWARF expression representing a value,
-  // rather than a location.
-  if (!isMemoryLocation() && !HasComplexExpression &&
-      (!isParameterValue() || isEntryValue())) {
+  // Handle simple register locations. If we are supposed to emit
+  // a call site parameter expression and if that expression is just a register
+  // location, emit it with addBReg and offset 0, because we should emit a DWARF
+  // expression representing a value, rather than a location.
+  if (!isMemoryLocation() && !HasComplexExpression && (!isParameterValue() ||
+                                                       isEntryValue())) {
     for (auto &Reg : DwarfRegs) {
       if (Reg.DwarfRegNo >= 0)
         addReg(Reg.DwarfRegNo, Reg.Comment);
@@ -311,10 +311,7 @@ void DwarfExpression::addEntryValueExpression(DIExpressionCursor &ExprCursor) {
   assert(!isMemoryLocation() &&
          "We don't support entry values of memory locations yet");
 
-  if (DwarfVersion >= 5)
-    emitOp(dwarf::DW_OP_entry_value);
-  else
-    emitOp(dwarf::DW_OP_GNU_entry_value);
+  emitOp(CU.getDwarf5OrGNULocationAtom(dwarf::DW_OP_entry_value));
   emitUnsigned(Op->getArg(0));
 }
 
@@ -346,11 +343,12 @@ void DwarfExpression::addExpression(DIExpressionCursor &&ExprCursor,
   while (ExprCursor) {
     auto Op = ExprCursor.take();
     uint64_t OpNum = Op->getOp();
+
     if (OpNum >= dwarf::DW_OP_reg0 && OpNum <= dwarf::DW_OP_reg31) {
-      if (isParameterValue())
-        addBReg(OpNum - dwarf::DW_OP_reg0, 0);
-      else
-        emitOp(OpNum);
+      emitOp(OpNum);
+      continue;
+    } else if (OpNum >= dwarf::DW_OP_breg0 && OpNum <= dwarf::DW_OP_breg31) {
+      addBReg(OpNum - dwarf::DW_OP_breg0, Op->getArg(0));
       continue;
     }
 
@@ -473,14 +471,13 @@ void DwarfExpression::addExpression(DIExpressionCursor &&ExprCursor,
       TagOffset = Op->getArg(0);
       break;
     case dwarf::DW_OP_regx:
-      if (isParameterValue()) {
-        emitOp(dwarf::DW_OP_bregx);
-        emitUnsigned(Op->getArg(0));
-        emitSigned(Op->getArg(1));
-      } else {
-        emitOp(dwarf::DW_OP_regx);
-        emitUnsigned(Op->getArg(0));
-      }
+      emitOp(dwarf::DW_OP_regx);
+      emitUnsigned(Op->getArg(0));
+      break;
+    case dwarf::DW_OP_bregx:
+      emitOp(dwarf::DW_OP_bregx);
+      emitUnsigned(Op->getArg(0));
+      emitSigned(Op->getArg(1));
       break;
     default:
       llvm_unreachable("unhandled opcode found in expression");

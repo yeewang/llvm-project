@@ -16,6 +16,8 @@
 
 #include "index/FileIndex.h"
 #include "index/Index.h"
+#include "llvm/Support/Threading.h"
+#include <cstddef>
 
 namespace clang {
 namespace clangd {
@@ -45,12 +47,9 @@ namespace clangd {
 // This class is exposed in the header so it can be tested.
 class BackgroundIndexRebuilder {
 public:
-  // Thresholds for rebuilding as TUs get indexed.
-  static constexpr unsigned TUsBeforeFirstBuild = 5;
-  static constexpr unsigned TUsBeforeRebuild = 100;
-
-  BackgroundIndexRebuilder(SwapIndex *Target, FileSymbols *Source)
-      : Target(Target), Source(Source) {}
+  BackgroundIndexRebuilder(SwapIndex *Target, FileSymbols *Source,
+                           unsigned Threads)
+      : TUsBeforeFirstBuild(Threads), Target(Target), Source(Source) {}
 
   // Called to indicate a TU has been indexed.
   // May rebuild, if enough TUs have been indexed.
@@ -63,13 +62,17 @@ public:
   // sessions may happen concurrently.
   void startLoading();
   // Called to indicate some shards were actually loaded from disk.
-  void loadedTU();
+  void loadedShard(size_t ShardCount);
   // Called to indicate we're finished loading shards from disk.
   // May rebuild (if any were loaded).
   void doneLoading();
 
   // Ensures we won't start any more rebuilds.
   void shutdown();
+
+  // Thresholds for rebuilding as TUs get indexed.
+  const unsigned TUsBeforeFirstBuild; // Typically one per worker thread.
+  const unsigned TUsBeforeRebuild = 100;
 
 private:
   // Run Check under the lock, and rebuild if it returns true.
@@ -87,7 +90,7 @@ private:
   unsigned IndexedTUsAtLastRebuild = 0;
   // Are we loading shards? May be multiple concurrent sessions.
   unsigned Loading = 0;
-  unsigned LoadedTUs; // In the current loading session.
+  unsigned LoadedShards; // In the current loading session.
 
   SwapIndex *Target;
   FileSymbols *Source;

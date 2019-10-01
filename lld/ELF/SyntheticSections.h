@@ -76,7 +76,7 @@ public:
     return SyntheticSection::classof(d) && d->name == ".eh_frame";
   }
 
-  template <class ELFT> void addSection(InputSectionBase *s);
+  void addSection(EhInputSection *sec);
 
   std::vector<EhInputSection *> sections;
   size_t numFdes = 0;
@@ -97,7 +97,9 @@ private:
   uint64_t size = 0;
 
   template <class ELFT, class RelTy>
-  void addSectionAux(EhInputSection *s, llvm::ArrayRef<RelTy> rels);
+  void addRecords(EhInputSection *s, llvm::ArrayRef<RelTy> rels);
+  template <class ELFT>
+  void addSectionAux(EhInputSection *s);
 
   template <class ELFT, class RelTy>
   CieRecord *addCie(EhSectionPiece &piece, ArrayRef<RelTy> rels);
@@ -434,8 +436,8 @@ public:
   uint32_t getSymIndex(SymbolTableBaseSection *symTab) const;
 
   // Computes the addend of the dynamic relocation. Note that this is not the
-  // same as the Addend member variable as it also includes the symbol address
-  // if UseSymVA is true.
+  // same as the addend member variable as it also includes the symbol address
+  // if useSymVA is true.
   int64_t computeAddend() const;
 
   RelType type;
@@ -1026,7 +1028,7 @@ private:
 // thunks including ARM interworking and Mips LA25 PI to non-PI thunks.
 class ThunkSection : public SyntheticSection {
 public:
-  // ThunkSection in OS, with desired OutSecOff of Off
+  // ThunkSection in OS, with desired outSecOff of Off
   ThunkSection(OutputSection *os, uint64_t off);
 
   // Add a newly created Thunk to this container:
@@ -1044,7 +1046,7 @@ private:
   size_t size = 0;
 };
 
-// Used to compute OutSecOff of .got2 in each object file. This is needed to
+// Used to compute outSecOff of .got2 in each object file. This is needed to
 // synthesize PLT entries for PPC32 Secure PLT ABI.
 class PPC32Got2Section final : public SyntheticSection {
 public:
@@ -1096,15 +1098,6 @@ public:
   size_t getSize() const override;
   void finalizeContents() override;
   void writeTo(uint8_t *buf) override;
-};
-
-// Create a dummy .sdata for __global_pointer$ if .sdata does not exist.
-class RISCVSdataSection final : public SyntheticSection {
-public:
-  RISCVSdataSection();
-  size_t getSize() const override { return 0; }
-  bool isNeeded() const override;
-  void writeTo(uint8_t *buf) override {}
 };
 
 InputSection *createInterpSection();
@@ -1171,7 +1164,6 @@ struct InStruct {
   PltSection *plt;
   PltSection *iplt;
   PPC32Got2Section *ppc32Got2;
-  RISCVSdataSection *riscvSdata;
   RelocationBaseSection *relaPlt;
   RelocationBaseSection *relaIplt;
   StringTableSection *shStrTab;

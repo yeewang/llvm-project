@@ -280,26 +280,26 @@ void ScriptParser::addFile(StringRef s) {
     SmallString<128> pathData;
     StringRef path = (config->sysroot + s).toStringRef(pathData);
     if (sys::fs::exists(path)) {
-      driver->addFile(Saver.save(path), /*WithLOption=*/false);
+      driver->addFile(saver.save(path), /*withLOption=*/false);
       return;
     }
   }
 
   if (s.startswith("/")) {
-    driver->addFile(s, /*WithLOption=*/false);
+    driver->addFile(s, /*withLOption=*/false);
   } else if (s.startswith("=")) {
     if (config->sysroot.empty())
-      driver->addFile(s.substr(1), /*WithLOption=*/false);
+      driver->addFile(s.substr(1), /*withLOption=*/false);
     else
-      driver->addFile(Saver.save(config->sysroot + "/" + s.substr(1)),
-                      /*WithLOption=*/false);
+      driver->addFile(saver.save(config->sysroot + "/" + s.substr(1)),
+                      /*withLOption=*/false);
   } else if (s.startswith("-l")) {
     driver->addLibrary(s.substr(2));
   } else if (sys::fs::exists(s)) {
-    driver->addFile(s, /*WithLOption=*/false);
+    driver->addFile(s, /*withLOption=*/false);
   } else {
     if (Optional<std::string> path = findFromSearchPaths(s))
-      driver->addFile(Saver.save(*path), /*WithLOption=*/true);
+      driver->addFile(saver.save(*path), /*withLOption=*/true);
     else
       setError("unable to find " + s);
   }
@@ -828,7 +828,9 @@ OutputSection *ScriptParser::readOutputSectionDescription(StringRef outSec) {
       // We handle the FILL command as an alias for =fillexp section attribute,
       // which is different from what GNU linkers do.
       // https://sourceware.org/binutils/docs/ld/Output-Section-Data.html
+      expect("(");
       cmd->filler = readFill();
+      expect(")");
     } else if (tok == "SORT") {
       readSort();
     } else if (tok == "INCLUDE") {
@@ -1342,16 +1344,10 @@ void ScriptParser::readAnonymousDeclaration() {
   std::vector<SymbolVersion> locals;
   std::vector<SymbolVersion> globals;
   std::tie(locals, globals) = readSymbols();
-
-  for (SymbolVersion v : locals) {
-    if (v.name == "*")
-      config->defaultSymbolVersion = VER_NDX_LOCAL;
-    else
-      config->versionScriptLocals.push_back(v);
-  }
-
-  for (SymbolVersion v : globals)
-    config->versionScriptGlobals.push_back(v);
+  for (const SymbolVersion &pat : locals)
+    config->versionDefinitions[VER_NDX_LOCAL].patterns.push_back(pat);
+  for (const SymbolVersion &pat : globals)
+    config->versionDefinitions[VER_NDX_GLOBAL].patterns.push_back(pat);
 
   expect(";");
 }
@@ -1363,22 +1359,14 @@ void ScriptParser::readVersionDeclaration(StringRef verStr) {
   std::vector<SymbolVersion> locals;
   std::vector<SymbolVersion> globals;
   std::tie(locals, globals) = readSymbols();
-
-  for (SymbolVersion v : locals) {
-    if (v.name == "*")
-      config->defaultSymbolVersion = VER_NDX_LOCAL;
-    else
-      config->versionScriptLocals.push_back(v);
-  }
+  for (const SymbolVersion &pat : locals)
+    config->versionDefinitions[VER_NDX_LOCAL].patterns.push_back(pat);
 
   // Create a new version definition and add that to the global symbols.
   VersionDefinition ver;
   ver.name = verStr;
-  ver.globals = globals;
-
-  // User-defined version number starts from 2 because 0 and 1 are
-  // reserved for VER_NDX_LOCAL and VER_NDX_GLOBAL, respectively.
-  ver.id = config->versionDefinitions.size() + 2;
+  ver.patterns = globals;
+  ver.id = config->versionDefinitions.size();
   config->versionDefinitions.push_back(ver);
 
   // Each version may have a parent version. For example, "Ver2"

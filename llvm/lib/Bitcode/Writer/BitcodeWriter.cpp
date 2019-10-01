@@ -86,7 +86,7 @@ static cl::opt<unsigned>
                    cl::desc("Number of metadatas above which we emit an index "
                             "to enable lazy-loading"));
 
-cl::opt<bool> WriteRelBFToSummary(
+static cl::opt<bool> WriteRelBFToSummary(
     "write-relbf-to-summary", cl::Hidden, cl::init(false),
     cl::desc("Write relative block frequency to function summary "));
 
@@ -659,6 +659,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_NO_RED_ZONE;
   case Attribute::NoReturn:
     return bitc::ATTR_KIND_NO_RETURN;
+  case Attribute::NoSync:
+    return bitc::ATTR_KIND_NOSYNC;
   case Attribute::NoCfCheck:
     return bitc::ATTR_KIND_NOCF_CHECK;
   case Attribute::NoUnwind:
@@ -721,6 +723,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_Z_EXT;
   case Attribute::ImmArg:
     return bitc::ATTR_KIND_IMMARG;
+  case Attribute::SanitizeMemTag:
+    return bitc::ATTR_KIND_SANITIZE_MEMTAG;
   case Attribute::EndAttrKinds:
     llvm_unreachable("Can not encode end-attribute kinds marker.");
   case Attribute::None:

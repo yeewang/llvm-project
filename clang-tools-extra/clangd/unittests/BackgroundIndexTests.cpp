@@ -74,7 +74,7 @@ public:
       return nullptr;
     }
     CacheHits++;
-    return llvm::make_unique<IndexFileIn>(std::move(*IndexFile));
+    return std::make_unique<IndexFileIn>(std::move(*IndexFile));
   }
 
   mutable llvm::StringSet<> AccessedPaths;
@@ -82,7 +82,7 @@ public:
 
 class BackgroundIndexTest : public ::testing::Test {
 protected:
-  BackgroundIndexTest() { BackgroundIndex::preventThreadStarvationInTests(); }
+  BackgroundIndexTest() { BackgroundQueue::preventThreadStarvationInTests(); }
 };
 
 TEST_F(BackgroundIndexTest, NoCrashOnErrorFile) {
@@ -211,7 +211,7 @@ TEST_F(BackgroundIndexTest, ShardStorageTest) {
     OverlayCDB CDB(/*Base=*/nullptr);
     BackgroundIndex Idx(Context::empty(), FS, CDB,
                         [&](llvm::StringRef) { return &MSS; });
-    CDB.setCompileCommand(testPath("root"), Cmd);
+    CDB.setCompileCommand(testPath("root/A.cc"), Cmd);
     ASSERT_TRUE(Idx.blockUntilIdleForTest());
   }
   EXPECT_EQ(CacheHits, 2U); // Check both A.cc and A.h loaded from cache.
@@ -335,7 +335,7 @@ TEST_F(BackgroundIndexTest, ShardStorageLoad) {
     OverlayCDB CDB(/*Base=*/nullptr);
     BackgroundIndex Idx(Context::empty(), FS, CDB,
                         [&](llvm::StringRef) { return &MSS; });
-    CDB.setCompileCommand(testPath("root"), Cmd);
+    CDB.setCompileCommand(testPath("root/A.cc"), Cmd);
     ASSERT_TRUE(Idx.blockUntilIdleForTest());
   }
   EXPECT_EQ(CacheHits, 2U); // Check both A.cc and A.h loaded from cache.
@@ -353,7 +353,7 @@ TEST_F(BackgroundIndexTest, ShardStorageLoad) {
     OverlayCDB CDB(/*Base=*/nullptr);
     BackgroundIndex Idx(Context::empty(), FS, CDB,
                         [&](llvm::StringRef) { return &MSS; });
-    CDB.setCompileCommand(testPath("root"), Cmd);
+    CDB.setCompileCommand(testPath("root/A.cc"), Cmd);
     ASSERT_TRUE(Idx.blockUntilIdleForTest());
   }
   EXPECT_EQ(CacheHits, 2U); // Check both A.cc and A.h loaded from cache.
@@ -575,7 +575,8 @@ TEST_F(BackgroundIndexTest, CmdLineHash) {
 class BackgroundIndexRebuilderTest : public testing::Test {
 protected:
   BackgroundIndexRebuilderTest()
-      : Target(llvm::make_unique<MemIndex>()), Rebuilder(&Target, &Source) {
+      : Target(std::make_unique<MemIndex>()),
+        Rebuilder(&Target, &Source, /*Threads=*/10) {
     // Prepare FileSymbols with TestSymbol in it, for checkRebuild.
     TestSymbol.ID = SymbolID("foo");
   }
@@ -587,7 +588,7 @@ protected:
     TestSymbol.Name = VersionStorage.back();
     SymbolSlab::Builder SB;
     SB.insert(TestSymbol);
-    Source.update("", llvm::make_unique<SymbolSlab>(std::move(SB).build()),
+    Source.update("", std::make_unique<SymbolSlab>(std::move(SB).build()),
                   nullptr, nullptr, false);
     // Now maybe update the index.
     Action();
@@ -610,19 +611,18 @@ protected:
 };
 
 TEST_F(BackgroundIndexRebuilderTest, IndexingTUs) {
-  for (unsigned I = 0; I < BackgroundIndexRebuilder::TUsBeforeFirstBuild - 1;
-       ++I)
+  for (unsigned I = 0; I < Rebuilder.TUsBeforeFirstBuild - 1; ++I)
     EXPECT_FALSE(checkRebuild([&] { Rebuilder.indexedTU(); }));
   EXPECT_TRUE(checkRebuild([&] { Rebuilder.indexedTU(); }));
-  for (unsigned I = 0; I < BackgroundIndexRebuilder::TUsBeforeRebuild - 1; ++I)
+  for (unsigned I = 0; I < Rebuilder.TUsBeforeRebuild - 1; ++I)
     EXPECT_FALSE(checkRebuild([&] { Rebuilder.indexedTU(); }));
   EXPECT_TRUE(checkRebuild([&] { Rebuilder.indexedTU(); }));
 }
 
 TEST_F(BackgroundIndexRebuilderTest, LoadingShards) {
   Rebuilder.startLoading();
-  Rebuilder.loadedTU();
-  Rebuilder.loadedTU();
+  Rebuilder.loadedShard(10);
+  Rebuilder.loadedShard(20);
   EXPECT_TRUE(checkRebuild([&] { Rebuilder.doneLoading(); }));
 
   // No rebuild for no shards.
@@ -631,19 +631,86 @@ TEST_F(BackgroundIndexRebuilderTest, LoadingShards) {
 
   // Loads can overlap.
   Rebuilder.startLoading();
-  Rebuilder.loadedTU();
+  Rebuilder.loadedShard(1);
   Rebuilder.startLoading();
-  Rebuilder.loadedTU();
+  Rebuilder.loadedShard(1);
   EXPECT_FALSE(checkRebuild([&] { Rebuilder.doneLoading(); }));
-  Rebuilder.loadedTU();
+  Rebuilder.loadedShard(1);
   EXPECT_TRUE(checkRebuild([&] { Rebuilder.doneLoading(); }));
 
   // No rebuilding for indexed files while loading.
   Rebuilder.startLoading();
-  for (unsigned I = 0; I < 3 * BackgroundIndexRebuilder::TUsBeforeRebuild; ++I)
+  for (unsigned I = 0; I < 3 * Rebuilder.TUsBeforeRebuild; ++I)
     EXPECT_FALSE(checkRebuild([&] { Rebuilder.indexedTU(); }));
   // But they get indexed when we're done, even if no shards were loaded.
   EXPECT_TRUE(checkRebuild([&] { Rebuilder.doneLoading(); }));
+}
+
+TEST(BackgroundQueueTest, Priority) {
+  // Create high and low priority tasks.
+  // Once a bunch of high priority tasks have run, the queue is stopped.
+  // So the low priority tasks should never run.
+  BackgroundQueue Q;
+  std::atomic<unsigned> HiRan(0), LoRan(0);
+  BackgroundQueue::Task Lo([&] { ++LoRan; });
+  BackgroundQueue::Task Hi([&] {
+    if (++HiRan >= 10)
+      Q.stop();
+  });
+  Hi.QueuePri = 100;
+
+  // Enqueuing the low-priority ones first shouldn't make them run first.
+  Q.append(std::vector<BackgroundQueue::Task>(30, Lo));
+  for (unsigned I = 0; I < 30; ++I)
+    Q.push(Hi);
+
+  AsyncTaskRunner ThreadPool;
+  for (unsigned I = 0; I < 5; ++I)
+    ThreadPool.runAsync("worker", [&] { Q.work(); });
+  // We should test enqueue with active workers, but it's hard to avoid races.
+  // Just make sure we don't crash.
+  Q.push(Lo);
+  Q.append(std::vector<BackgroundQueue::Task>(2, Hi));
+
+  // After finishing, check the tasks that ran.
+  ThreadPool.wait();
+  EXPECT_GE(HiRan, 10u);
+  EXPECT_EQ(LoRan, 0u);
+}
+
+TEST(BackgroundQueueTest, Boost) {
+  std::string Sequence;
+
+  BackgroundQueue::Task A([&] { Sequence.push_back('A'); });
+  A.Tag = "A";
+  A.QueuePri = 1;
+
+  BackgroundQueue::Task B([&] { Sequence.push_back('B'); });
+  B.QueuePri = 2;
+  B.Tag = "B";
+
+  {
+    BackgroundQueue Q;
+    Q.append({A, B});
+    Q.work([&] { Q.stop(); });
+    EXPECT_EQ("BA", Sequence) << "priority order";
+  }
+  Sequence.clear();
+  {
+    BackgroundQueue Q;
+    Q.boost("A", 3);
+    Q.append({A, B});
+    Q.work([&] { Q.stop(); });
+    EXPECT_EQ("AB", Sequence) << "A was boosted before enqueueing";
+  }
+  Sequence.clear();
+  {
+    BackgroundQueue Q;
+    Q.append({A, B});
+    Q.boost("A", 3);
+    Q.work([&] { Q.stop(); });
+    EXPECT_EQ("AB", Sequence) << "A was boosted after enqueueing";
+  }
 }
 
 } // namespace clangd

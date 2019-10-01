@@ -3,14 +3,12 @@
 
 # RUN: llvm-mc -filetype=obj -triple=mips-unknown-linux -o %t.o %s
 # RUN: ld.lld -shared -o %t.so %t.o
-# RUN: llvm-objdump -dD %t.so | FileCheck %s
+# RUN: llvm-readelf --mips-plt-got %t.so | FileCheck %s
 
-# CHECK: 000001f1 .rodata:
-#                'f''o''o''\0'
-# CHECK-NEXT: 1f1: 66 6f 6f 00
-# CHECK: lw      $25, -32744($gp)
-#                            0x1f1
-# CHECK-NEXT: addiu   $4, $25, 497
+# CHECK:       Local entries:
+# CHECK-NEXT:         Address     Access  Initial
+# CHECK-NEXT:   {{[0-9a-f]+}} -32744(gp) 00000000
+# CHECK-NEXT:   {{[0-9a-f]+}} -32740(gp) 00010000
 
   .text
   lw     $t9, %got($.str)($gp)

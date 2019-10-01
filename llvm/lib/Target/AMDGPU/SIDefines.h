@@ -263,6 +263,7 @@ enum Id { // Message ID, width(4) [3:0].
   ID_GS,
   ID_GS_DONE,
   ID_GS_ALLOC_REQ = 9,
+  ID_GET_DOORBELL = 10,
   ID_SYSMSG = 15,
   ID_GAPS_LAST_, // Indicate that sequence has gaps.
   ID_GAPS_FIRST_ = ID_INTERRUPT,
@@ -443,6 +444,7 @@ namespace DPP {
 
 enum DppCtrl : unsigned {
   QUAD_PERM_FIRST   = 0,
+  QUAD_PERM_ID      = 0xE4, // identity permutation
   QUAD_PERM_LAST    = 0xFF,
   DPP_UNUSED1       = 0x100,
   ROW_SHL0          = 0x100,

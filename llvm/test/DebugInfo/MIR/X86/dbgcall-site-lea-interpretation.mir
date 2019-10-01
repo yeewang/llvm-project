@@ -1,38 +1,38 @@
 # RUN: llc -debug-entry-values -start-after=machineverifier -filetype=obj %s -o -| llvm-dwarfdump -| FileCheck %s
-# CHECK: DW_TAG_GNU_call_site
-# CHECK-NEXT:   DW_AT_abstract_origin {{.*}} "foo")
-# CHECK-NEXT:   DW_AT_low_pc {{.*}} 
-# CHECK-EMPTY: 
-# CHECK-NEXT:   DW_TAG_GNU_call_site_parameter
-# CHECK-NEXT:     DW_AT_location      (DW_OP_reg9 R9)
-# CHECK-NEXT:     DW_AT_GNU_call_site_value   (DW_OP_breg15 R15+10)
-# CHECK-EMPTY: 
-# CHECK-NEXT:   DW_TAG_GNU_call_site_parameter
-# CHECK-NEXT:     DW_AT_location      (DW_OP_reg8 R8)
-# CHECK-NEXT:     DW_AT_GNU_call_site_value   (DW_OP_breg15 R15+0, DW_OP_lit2, DW_OP_mul, DW_OP_lit8, DW_OP_plus)
-# CHECK-EMPTY: 
-# CHECK-NEXT:   DW_TAG_GNU_call_site_parameter
-# CHECK-NEXT:     DW_AT_location      (DW_OP_reg1 RDX)
-# CHECK-NEXT:     DW_AT_GNU_call_site_value   (DW_OP_breg14 R14+0, DW_OP_lit5, DW_OP_mul, DW_OP_lit8, DW_OP_plus)
-# CHECK-EMPTY: 
-# CHECK-NEXT:   DW_TAG_GNU_call_site_parameter
-# CHECK-NEXT:     DW_AT_location      (DW_OP_reg4 RSI)
-# CHECK-NEXT:     DW_AT_GNU_call_site_value   (DW_OP_breg14 R14+0)
-# CHECK-EMPTY: 
-# CHECK-NEXT:   DW_TAG_GNU_call_site_parameter
-# CHECK-NEXT:     DW_AT_location      (DW_OP_reg5 RDI)
-# CHECK-NEXT:     DW_AT_GNU_call_site_value   (DW_OP_breg14 R14+0, DW_OP_breg15 R15+0, DW_OP_lit2, DW_OP_mul, DW_OP_plus, DW_OP_lit4, DW_OP_plus)
-# CHECK-EMPTY: 
-# CHECK-NEXT:   DW_TAG_GNU_call_site_parameter
-# CHECK-NEXT:     DW_AT_location      (DW_OP_reg2 RCX)
-# CHECK-NEXT:     DW_AT_GNU_call_site_value   (DW_OP_breg14 R14+0, DW_OP_breg15 R15+0, DW_OP_plus)
-# CHECK: DW_TAG_GNU_call_site
-# CHECK-NEXT:   DW_AT_abstract_origin {{.*}} "foo2")
-# CHECK-NEXT:   DW_AT_low_pc {{.*}}
-# CHECK-EMPTY: 
-# CHECK-NEXT:   DW_TAG_GNU_call_site_parameter
-# CHECK-NEXT:     DW_AT_location      (DW_OP_reg5 RDI)
-# CHECK-NEXT:     DW_AT_GNU_call_site_value   (DW_OP_breg14 R14+0, DW_OP_lit2, DW_OP_mul)
+# CHECK:        DW_TAG_GNU_call_site
+# CHECK-NEXT:     DW_AT_abstract_origin {{.*}} "foo")
+# CHECK-NEXT:     DW_AT_low_pc {{.*}}
+# CHECK-EMPTY:
+# CHECK-NEXT:     DW_TAG_GNU_call_site_parameter
+# CHECK-NEXT:       DW_AT_location      (DW_OP_reg9 R9)
+# CHECK-NEXT:       DW_AT_GNU_call_site_value   (DW_OP_breg15 R15+10)
+# CHECK-EMPTY:
+# CHECK-NEXT:     DW_TAG_GNU_call_site_parameter
+# CHECK-NEXT:       DW_AT_location      (DW_OP_reg8 R8)
+# CHECK-NEXT:       DW_AT_GNU_call_site_value   (DW_OP_breg15 R15+0, DW_OP_lit2, DW_OP_mul, DW_OP_plus_uconst 0x8)
+# CHECK-EMPTY:
+# CHECK-NEXT:     DW_TAG_GNU_call_site_parameter
+# CHECK-NEXT:       DW_AT_location      (DW_OP_reg1 RDX)
+# CHECK-NEXT:       DW_AT_GNU_call_site_value   (DW_OP_breg14 R14+0, DW_OP_lit5, DW_OP_mul, DW_OP_plus_uconst 0x8)
+# CHECK-EMPTY:
+# CHECK-NEXT:     DW_TAG_GNU_call_site_parameter
+# CHECK-NEXT:       DW_AT_location      (DW_OP_reg4 RSI)
+# CHECK-NEXT:       DW_AT_GNU_call_site_value   (DW_OP_breg14 R14+0)
+# CHECK-EMPTY:
+# CHECK-NEXT:     DW_TAG_GNU_call_site_parameter
+# CHECK-NEXT:       DW_AT_location      (DW_OP_reg5 RDI)
+# CHECK-NEXT:       DW_AT_GNU_call_site_value   (DW_OP_breg14 R14+0, DW_OP_breg15 R15+0, DW_OP_lit2, DW_OP_mul, DW_OP_plus, DW_OP_plus_uconst 0x4)
+# CHECK-EMPTY:
+# CHECK-NEXT:     DW_TAG_GNU_call_site_parameter
+# CHECK-NEXT:       DW_AT_location      (DW_OP_reg2 RCX)
+# CHECK-NEXT:       DW_AT_GNU_call_site_value   (DW_OP_breg14 R14+0, DW_OP_breg15 R15+0, DW_OP_plus)
+# CHECK:        DW_TAG_GNU_call_site
+# CHECK-NEXT:     DW_AT_abstract_origin {{.*}} "foo2")
+# CHECK-NEXT:     DW_AT_low_pc {{.*}}
+# CHECK-EMPTY:
+# CHECK-NEXT:     DW_TAG_GNU_call_site_parameter
+# CHECK-NEXT:       DW_AT_location      (DW_OP_reg5 RDI)
+# CHECK-NEXT:       DW_AT_GNU_call_site_value   (DW_OP_breg14 R14+0, DW_OP_lit2, DW_OP_mul)
 --- |
   ; ModuleID = 'dbgcall-site-lea-interpretation.ll'
   source_filename = "dbgcall-site-lea-interpretation.c"
