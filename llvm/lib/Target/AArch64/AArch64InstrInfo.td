@@ -802,7 +802,7 @@ def HWASAN_CHECK_MEMACCESS : Pseudo<
   Sched<[]>;
 def HWASAN_CHECK_MEMACCESS_SHORTGRANULES : Pseudo<
   (outs), (ins GPR64noip:$ptr, i32imm:$accessinfo),
-  [(int_hwasan_check_memaccess_shortgranules X9, GPR64noip:$ptr, (i32 timm:$accessinfo))]>,
+  [(int_hwasan_check_memaccess_shortgranules X9, GPR64noip:$ptr, (i32 imm:$accessinfo))]>,
   Sched<[]>;
 }
 
