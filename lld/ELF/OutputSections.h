@@ -71,9 +71,7 @@ public:
   uint64_t addr = 0;
   uint32_t shName = 0;
 
-  void recordSection(InputSectionBase *isec);
-  void commitSection(InputSection *isec);
-  void finalizeInputSections();
+  void addSection(InputSection *isec);
 
   // The following members are normally only used in linker scripts.
   MemoryRegion *memRegion = nullptr;

@@ -34,12 +34,7 @@ TargetInfo::TargetInfo(const llvm::Triple &T) : TargetOpts(), Triple(T) {
   NoAsmVariants = false;
   HasLegalHalfType = false;
   HasFloat128 = false;
-
-  // Android-changed: Make HasFloat16 available by default
-  // http://b/127391056
-  // HasFloat16 = false;
-  HasFloat16 = true;
-
+  HasFloat16 = false;
   PointerWidth = PointerAlign = 32;
   BoolWidth = BoolAlign = 8;
   IntWidth = IntAlign = 32;

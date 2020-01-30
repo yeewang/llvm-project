@@ -52,7 +52,7 @@
 
 #include "llvm/ADT/StringRef.h"
 
-#ifdef _WIN32
+#ifdef _MSC_VER
 #include "lldb/Host/windows/windows.h"
 #endif
 

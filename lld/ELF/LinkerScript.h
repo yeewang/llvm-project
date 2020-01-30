@@ -168,12 +168,6 @@ struct InputSectionDescription : BaseCommand {
   // will be associated with this InputSectionDescription.
   std::vector<SectionPattern> sectionPatterns;
 
-  // Includes InputSections and MergeInputSections. Used temporarily during
-  // assignment of input sections to output sections.
-  std::vector<InputSectionBase *> sectionBases;
-
-  // Used after the finalizeInputSections() pass. MergeInputSections have been
-  // merged into MergeSyntheticSections.
   std::vector<InputSection *> sections;
 
   // Temporary record of synthetic ThunkSection instances and the pass that
@@ -232,10 +226,10 @@ class LinkerScript final {
   void expandOutputSection(uint64_t size);
   void expandMemoryRegions(uint64_t size);
 
-  std::vector<InputSectionBase *>
+  std::vector<InputSection *>
   computeInputSections(const InputSectionDescription *);
 
-  std::vector<InputSectionBase *> createInputSectionList(OutputSection &cmd);
+  std::vector<InputSection *> createInputSectionList(OutputSection &cmd);
 
   std::vector<size_t> getPhdrIndices(OutputSection *sec);
 
@@ -265,7 +259,7 @@ public:
 
   bool hasPhdrsCommands() { return !phdrsCommands.empty(); }
   uint64_t getDot() { return dot; }
-  void discard(InputSectionBase *s);
+  void discard(ArrayRef<InputSection *> v);
 
   ExprValue getSymbolValue(StringRef name, const Twine &loc);
 

@@ -211,8 +211,7 @@ static MCStreamer *createELFStreamer(const Triple &T, MCContext &Ctx,
                                      bool RelaxAll) {
   return createARMELFStreamer(
       Ctx, std::move(MAB), std::move(OW), std::move(Emitter), false,
-      (T.getArch() == Triple::thumb || T.getArch() == Triple::thumbeb),
-      T.isAndroid());
+      (T.getArch() == Triple::thumb || T.getArch() == Triple::thumbeb));
 }
 
 static MCStreamer *

@@ -7741,9 +7741,8 @@ class TransformTypos : public TreeTransform<TransformTypos> {
 
     // If we found a valid result, double check to make sure it's not ambiguous.
     if (!IsAmbiguous && !Res.isInvalid() && !AmbiguousTypoExprs.empty()) {
-      auto SavedTransformCache =
-          llvm::SmallDenseMap<TypoExpr *, ExprResult, 2>(TransformCache);
-
+      auto SavedTransformCache = std::move(TransformCache);
+      TransformCache.clear();
       // Ensure none of the TypoExprs have multiple typo correction candidates
       // with the same edit length that pass all the checks and filters.
       while (!AmbiguousTypoExprs.empty()) {
@@ -7756,10 +7755,6 @@ class TransformTypos : public TreeTransform<TransformTypos> {
         TypoCorrection TC = SemaRef.getTypoExprState(TE).Consumer->peekNextCorrection();
         TypoCorrection Next;
         do {
-          // Fetch the next correction by erasing the typo from the cache and calling
-          // `TryTransform` which will iterate through corrections in
-          // `TransformTypoExpr`.
-          TransformCache.erase(TE);
           ExprResult AmbigRes = CheckForRecursiveTypos(TryTransform(E), IsAmbiguous);
 
           if (!AmbigRes.isInvalid() || IsAmbiguous) {
